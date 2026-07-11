@@ -1,0 +1,83 @@
+const express = require('express')
+const router = express.Router()
+const bcrypt = require('bcrypt')
+const jwt = require('jsonwebtoken')
+const { createClient } = require('@supabase/supabase-js')
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+)
+
+// POST /api/auth/register
+router.post('/register', async (req, res) => {
+  const { email, password, first_name, last_name, nationality } = req.body
+
+  try {
+    const password_hash = await bcrypt.hash(password, 10)
+
+    const { data: newUser, error } = await supabase
+      .from('users')
+      .insert([{ email, password_hash, first_name, last_name, nationality }])
+      .select('id, email, first_name')
+      .single()
+
+    if (error) return res.status(400).json({ error: error.message })
+
+    await supabase
+      .from('credits')
+      .insert([{ user_id: newUser.id, balance: 1 }])
+
+    const token = jwt.sign(
+      { userId: newUser.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    )
+
+    res.status(201).json({ token, user: newUser })
+
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Registration failed' })
+  }
+})
+
+// POST /api/auth/login
+router.post('/login', async (req, res) => {
+  const { email, password } = req.body
+
+  try {
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single()
+
+    if (error || !user) {
+      return res.status(401).json({ error: 'User not found' })
+    }
+
+    const passwordMatch = await bcrypt.compare(password, user.password_hash)
+
+    if (!passwordMatch) {
+      return res.status(401).json({ error: 'Wrong password' })
+    }
+
+    const token = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    )
+
+    res.json({
+      token,
+      user: { id: user.id, email: user.email, first_name: user.first_name }
+    })
+
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Login failed' })
+  }
+})
+
+module.exports = router
