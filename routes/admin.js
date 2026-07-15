@@ -84,5 +84,47 @@ router.post('/classes/:id/reject', async (req, res) => {
     res.status(500).json({ error: 'Could not reject class' })
   }
 })
+// POST /api/admin/classes/:id/complete
+router.post('/classes/:id/complete', async (req, res) => {
+  try {
+    // Get the class to find the teacher
+    const { data: cls, error: classError } = await supabase
+      .from('classes')
+      .select('teacher_id, status')
+      .eq('id', req.params.id)
+      .single()
 
+    if (classError || !cls) {
+      return res.status(404).json({ error: 'Class not found' })
+    }
+
+    // Mark class as completed
+    await supabase
+      .from('classes')
+      .update({ status: 'completed' })
+      .eq('id', req.params.id)
+
+    // Give teacher exactly 1 credit
+    await supabase
+      .from('credits')
+      .update({ balance: supabase.raw('balance + 1') })
+      .eq('user_id', cls.teacher_id)
+
+    // Record the transaction
+    await supabase
+      .from('credit_transactions')
+      .insert([{
+        user_id: cls.teacher_id,
+        amount: 1,
+        type: 'earned',
+        description: 'Taught a class',
+        related_class_id: parseInt(req.params.id)
+      }])
+
+    res.json({ success: true })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not complete class' })
+  }
+})
 module.exports = router
