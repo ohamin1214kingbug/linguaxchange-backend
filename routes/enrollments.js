@@ -1,13 +1,3 @@
-const express = require('express')
-const router = express.Router()
-const { createClient } = require('@supabase/supabase-js')
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-)
-
-// POST /api/enrollments - enroll in a class
 router.post('/', async (req, res) => {
   const { user_id, class_session_id } = req.body
   try {
@@ -22,11 +12,34 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Not enough credits' })
     }
 
+    // Create a session for this class if it doesn't exist
+    let sessionId = class_session_id
+    const { data: existingSession } = await supabase
+      .from('class_sessions')
+      .select('id')
+      .eq('class_id', class_session_id)
+      .single()
+
+    if (existingSession) {
+      sessionId = existingSession.id
+    } else {
+      const { data: newSession } = await supabase
+        .from('class_sessions')
+        .insert([{
+          class_id: class_session_id,
+          session_date: new Date().toISOString(),
+          status: 'scheduled'
+        }])
+        .select()
+        .single()
+      sessionId = newSession.id
+    }
+
     // Enroll the student
     const { data, error } = await supabase
       .from('class_enrollments')
       .insert([{
-        class_session_id,
+        class_session_id: sessionId,
         user_id,
         status: 'confirmed',
         attended: false
@@ -55,82 +68,6 @@ router.post('/', async (req, res) => {
     res.status(201).json(data)
   } catch (e) {
     console.error(e)
-    res.status(500).json({ error: 'Could not enroll' })
+    res.status(500).json({ error: e.message })
   }
 })
-
-// POST /api/enrollments/:id/confirm - student confirms attendance
-router.post('/:id/confirm', async (req, res) => {
-  const { user_id } = req.body
-  try {
-    // Mark student as attended
-    const { data: enrollment, error } = await supabase
-      .from('class_enrollments')
-      .update({ attended: true, status: 'attended' })
-      .eq('id', req.params.id)
-      .eq('user_id', user_id)
-      .select('*, class_sessions(class_id)')
-      .single()
-
-    if (error) return res.status(400).json({ error: error.message })
-
-    // Get the class to find the teacher
-    const { data: session } = await supabase
-      .from('class_sessions')
-      .select('class_id')
-      .eq('id', enrollment.class_session_id)
-      .single()
-
-    const { data: cls } = await supabase
-      .from('classes')
-      .select('teacher_id')
-      .eq('id', session.class_id)
-      .single()
-
-    // Give teacher +1 credit
-    const { data: teacherCredit } = await supabase
-      .from('credits')
-      .select('balance')
-      .eq('user_id', cls.teacher_id)
-      .single()
-
-    await supabase
-      .from('credits')
-      .update({ balance: (teacherCredit?.balance || 0) + 1 })
-      .eq('user_id', cls.teacher_id)
-
-    // Record transaction for teacher
-    await supabase
-      .from('credit_transactions')
-      .insert([{
-        user_id: cls.teacher_id,
-        amount: 1,
-        type: 'earned',
-        description: 'Student confirmed attendance'
-      }])
-
-    res.json({ success: true })
-  } catch (e) {
-    console.error(e)
-    res.status(500).json({ error: 'Could not confirm attendance' })
-  }
-})
-
-// GET /api/enrollments?user_id=1 - get user's enrollments
-router.get('/', async (req, res) => {
-  const { user_id } = req.query
-  try {
-    const { data, error } = await supabase
-      .from('class_enrollments')
-      .select('*, class_sessions(*, classes(*))')
-      .eq('user_id', user_id)
-      .order('created_at', { ascending: false })
-
-    if (error) return res.status(400).json({ error: error.message })
-    res.json(data)
-  } catch (e) {
-    res.status(500).json({ error: 'Could not fetch enrollments' })
-  }
-})
-
-module.exports = router
