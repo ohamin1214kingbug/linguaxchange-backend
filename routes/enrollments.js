@@ -132,6 +132,5 @@ router.get('/', async (req, res) => {
     res.status(500).json({ error: 'Could not fetch enrollments' })
   }
 })
-const enrollmentRoutes = require('./routes/enrollments')
-app.use('/api/enrollments', enrollmentRoutes)
+
 module.exports = router
