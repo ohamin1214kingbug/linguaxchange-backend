@@ -1,0 +1,48 @@
+const express = require('express')
+const router = express.Router()
+const { createClient } = require('@supabase/supabase-js')
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+)
+
+// POST /api/reviews
+router.post('/', async (req, res) => {
+  const { class_session_id, student_id, rating, comment } = req.body
+  try {
+    const { data, error } = await supabase
+      .from('class_reviews')
+      .insert([{
+        class_session_id: parseInt(class_session_id),
+        student_id: parseInt(student_id),
+        rating: parseInt(rating),
+        comment
+      }])
+      .select()
+      .single()
+
+    if (error) return res.status(400).json({ error: error.message })
+    res.status(201).json(data)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not submit review' })
+  }
+})
+
+// GET /api/reviews/teacher/:teacherId
+router.get('/teacher/:teacherId', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('class_reviews')
+      .select('*, class_sessions(*, classes(teacher_id))')
+      .order('created_at', { ascending: false })
+
+    if (error) return res.status(400).json({ error: error.message })
+    res.json(data)
+  } catch (e) {
+    res.status(500).json({ error: 'Could not fetch reviews' })
+  }
+})
+
+module.exports = router

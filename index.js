@@ -23,3 +23,5 @@ app.listen(PORT, () => {
 })
 const enrollmentRoutes = require('./routes/enrollments')
 app.use('/api/enrollments', enrollmentRoutes)
+const reviewRoutes = require('./routes/reviews')
+app.use('/api/reviews', reviewRoutes)
