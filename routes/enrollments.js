@@ -69,6 +69,26 @@ router.post('/', async (req, res) => {
         description: 'Joined a class'
       }])
 
+    const { data: cls } = await supabase
+      .from('classes')
+      .select('title, teacher_id')
+      .eq('id', class_id)
+      .single()
+
+    const { data: teacher } = await supabase
+      .from('users')
+      .select('email, first_name')
+      .eq('id', cls?.teacher_id)
+      .single()
+
+    const { data: student } = await supabase
+      .from('users')
+      .select('first_name, email')
+      .eq('id', user_id)
+      .single()
+
+    console.log(`[EMAIL] Student joined class — to: ${teacher?.email}, subject: "A student joined '${cls?.title}'", body: "Hi ${teacher?.first_name}, ${student?.first_name} has joined your class."`)
+
     res.status(201).json(data)
   } catch (e) {
     console.error(e)

@@ -61,11 +61,22 @@ router.post('/users/:id/reject', async (req, res) => {
 
 router.post('/classes/:id/approve', async (req, res) => {
   try {
-    const { error } = await supabase
+    const { data: cls, error } = await supabase
       .from('classes')
       .update({ status: 'approved' })
       .eq('id', req.params.id)
+      .select('id, title, teacher_id')
+      .single()
     if (error) return res.status(400).json({ error: error.message })
+
+    const { data: teacher } = await supabase
+      .from('users')
+      .select('email, first_name')
+      .eq('id', cls.teacher_id)
+      .single()
+
+    console.log(`[EMAIL] Class approved — to: ${teacher?.email}, subject: "Your class '${cls.title}' has been approved!", body: "Hi ${teacher?.first_name}, your class is now live and students can join."`)
+
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not approve class' })
