@@ -9,11 +9,17 @@ const supabase = createClient(
 
 router.get('/', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const query = supabase
       .from('classes')
-      .select('*')
+      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url)')
       .eq('status', 'approved')
       .order('created_at', { ascending: false })
+
+    if (req.query.teacher_id) {
+      query.eq('teacher_id', req.query.teacher_id)
+    }
+
+    const { data, error } = await query
     if (error) return res.status(400).json({ error: error.message })
     res.json(data)
   } catch (e) {

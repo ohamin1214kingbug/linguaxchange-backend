@@ -33,9 +33,20 @@ router.post('/', async (req, res) => {
 // GET /api/reviews/teacher/:teacherId
 router.get('/teacher/:teacherId', async (req, res) => {
   try {
+    const { data: sessions, error: sessionError } = await supabase
+      .from('class_sessions')
+      .select('id, classes!inner(teacher_id)')
+      .eq('classes.teacher_id', req.params.teacherId)
+
+    if (sessionError) return res.status(400).json({ error: sessionError.message })
+
+    const sessionIds = sessions.map(s => s.id)
+    if (sessionIds.length === 0) return res.json([])
+
     const { data, error } = await supabase
       .from('class_reviews')
-      .select('*, class_sessions(*, classes(teacher_id))')
+      .select('rating, comment, created_at')
+      .in('class_session_id', sessionIds)
       .order('created_at', { ascending: false })
 
     if (error) return res.status(400).json({ error: error.message })
