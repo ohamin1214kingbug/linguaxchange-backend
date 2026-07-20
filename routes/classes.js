@@ -1,6 +1,8 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { requireAuth, requireAdmin } = require('../middleware/auth')
+const { sendEmail } = require('../utils/mailer')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -11,7 +13,7 @@ router.get('/', async (req, res) => {
   try {
     const query = supabase
       .from('classes')
-      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url)')
+      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status)')
       .eq('status', 'approved')
       .order('created_at', { ascending: false })
 
@@ -27,18 +29,20 @@ router.get('/', async (req, res) => {
   }
 })
 
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   const {
-    teacher_id, language_code, level, topic,
+    language_code, level, topic,
     title, description, max_students, duration_minutes,
-    format, recurrence_type, materials
+    format, recurrence_type, materials, scheduled_at, meeting_link
   } = req.body
 
+  if (!scheduled_at) return res.status(400).json({ error: 'scheduled_at is required' })
+
   try {
-    const { data, error } = await supabase
+    const { data: cls, error } = await supabase
       .from('classes')
       .insert([{
-        teacher_id: parseInt(teacher_id),
+        teacher_id: req.userId,
         language_code,
         level,
         topic,
@@ -47,6 +51,9 @@ router.post('/', async (req, res) => {
         max_students: parseInt(max_students),
         duration_minutes: parseInt(duration_minutes),
         format,
+        recurrence_type: recurrence_type || null,
+        materials: materials || null,
+        zoom_meeting_link: meeting_link || null,
         status: 'pending'
       }])
       .select()
@@ -56,27 +63,57 @@ router.post('/', async (req, res) => {
       console.log('SUPABASE ERROR:', error)
       return res.status(400).json({ error: error.message })
     }
-    res.status(201).json(data)
+
+    const { error: sessionError } = await supabase
+      .from('class_sessions')
+      .insert([{
+        class_id: cls.id,
+        session_date: new Date(scheduled_at).toISOString(),
+        zoom_meeting_link: meeting_link || null,
+        status: 'scheduled'
+      }])
+
+    if (sessionError) {
+      console.log('SESSION ERROR:', sessionError)
+      return res.status(400).json({ error: sessionError.message })
+    }
+
+    res.status(201).json(cls)
   } catch (e) {
     console.log('CATCH ERROR:', e.message)
     res.status(500).json({ error: e.message })
   }
 })
 
-router.post('/:id/approve', async (req, res) => {
+router.post('/:id/approve', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const { error } = await supabase
+    const { data: cls, error } = await supabase
       .from('classes')
       .update({ status: 'approved' })
       .eq('id', req.params.id)
+      .select('id, title, teacher_id')
+      .single()
     if (error) return res.status(400).json({ error: error.message })
+
+    const { data: teacher } = await supabase
+      .from('users')
+      .select('email, first_name')
+      .eq('id', cls.teacher_id)
+      .single()
+
+    await sendEmail({
+      to: teacher?.email,
+      subject: `Your class '${cls.title}' has been approved!`,
+      text: `Hi ${teacher?.first_name}, your class is now live and students can join.`
+    })
+
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not approve class' })
   }
 })
 
-router.post('/:id/reject', async (req, res) => {
+router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
   try {
     const { error } = await supabase
       .from('classes')

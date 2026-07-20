@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { requireAuth } = require('../middleware/auth')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -24,7 +25,10 @@ router.get('/:id', async (req, res) => {
 })
 
 // PATCH /api/users/:id
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requireAuth, async (req, res) => {
+  if (req.userId !== parseInt(req.params.id)) {
+    return res.status(403).json({ error: 'You can only edit your own profile' })
+  }
   const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name']
   const updates = {}
   for (const key of allowed) {

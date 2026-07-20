@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
+const { requireAuth } = require('../middleware/auth')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -9,8 +10,9 @@ const supabase = createClient(
 )
 
 // POST /api/enrollments - enroll in a class
-router.post('/', async (req, res) => {
-  const { user_id, class_id } = req.body
+router.post('/', requireAuth, async (req, res) => {
+  const { class_id } = req.body
+  const user_id = req.userId
   try {
     const { data: credit } = await supabase
       .from('credits')
@@ -22,20 +24,33 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Not enough credits' })
     }
 
-    // Create session first
+    // Find the next scheduled session for this class
     const { data: session, error: sessionError } = await supabase
       .from('class_sessions')
-      .insert([{
-        class_id: parseInt(class_id),
-        session_date: new Date().toISOString(),
-        status: 'scheduled'
-      }])
       .select()
-      .single()
+      .eq('class_id', parseInt(class_id))
+      .eq('status', 'scheduled')
+      .order('session_date', { ascending: true })
+      .limit(1)
+      .maybeSingle()
 
     if (sessionError) {
       console.log('SESSION ERROR:', sessionError)
       return res.status(400).json({ error: sessionError.message })
+    }
+    if (!session) {
+      return res.status(400).json({ error: 'No scheduled session for this class' })
+    }
+
+    const { data: existingEnrollment } = await supabase
+      .from('class_enrollments')
+      .select('id')
+      .eq('class_session_id', session.id)
+      .eq('user_id', user_id)
+      .maybeSingle()
+
+    if (existingEnrollment) {
+      return res.status(400).json({ error: 'Already joined this class' })
     }
 
     // Enroll student
@@ -43,7 +58,7 @@ router.post('/', async (req, res) => {
       .from('class_enrollments')
       .insert([{
         class_session_id: session.id,
-        user_id: parseInt(user_id),
+        user_id,
         status: 'confirmed',
         attended: false
       }])
@@ -64,7 +79,7 @@ router.post('/', async (req, res) => {
     await supabase
       .from('credit_transactions')
       .insert([{
-        user_id: parseInt(user_id),
+        user_id,
         amount: -1,
         type: 'spent',
         description: 'Joined a class'
@@ -102,8 +117,8 @@ router.post('/', async (req, res) => {
 })
 
 // POST /api/enrollments/:id/confirm
-router.post('/:id/confirm', async (req, res) => {
-  const { user_id } = req.body
+router.post('/:id/confirm', requireAuth, async (req, res) => {
+  const user_id = req.userId
   try {
     const { data: enrollment, error } = await supabase
       .from('class_enrollments')
@@ -154,14 +169,13 @@ router.post('/:id/confirm', async (req, res) => {
   }
 })
 
-// GET /api/enrollments?user_id=1
-router.get('/', async (req, res) => {
-  const { user_id } = req.query
+// GET /api/enrollments
+router.get('/', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('class_enrollments')
       .select('*, class_sessions(*, classes(*))')
-      .eq('user_id', user_id)
+      .eq('user_id', req.userId)
       .order('created_at', { ascending: false })
 
     if (error) return res.status(400).json({ error: error.message })

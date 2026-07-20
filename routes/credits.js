@@ -1,20 +1,20 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { requireAuth } = require('../middleware/auth')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 )
 
-// GET /api/credits?user_id=1
-router.get('/', async (req, res) => {
-  const { user_id } = req.query
+// GET /api/credits
+router.get('/', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('credits')
       .select('balance')
-      .eq('user_id', user_id)
+      .eq('user_id', req.userId)
       .single()
 
     if (error) return res.status(400).json({ error: error.message })
@@ -25,14 +25,13 @@ router.get('/', async (req, res) => {
   }
 })
 
-// GET /api/credits/transactions?user_id=1
-router.get('/transactions', async (req, res) => {
-  const { user_id } = req.query
+// GET /api/credits/transactions
+router.get('/transactions', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('credit_transactions')
       .select('*')
-      .eq('user_id', user_id)
+      .eq('user_id', req.userId)
       .order('created_at', { ascending: false })
 
     if (error) return res.status(400).json({ error: error.message })

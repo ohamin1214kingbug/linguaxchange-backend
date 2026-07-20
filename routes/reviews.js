@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { requireAuth } = require('../middleware/auth')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -8,14 +9,14 @@ const supabase = createClient(
 )
 
 // POST /api/reviews
-router.post('/', async (req, res) => {
-  const { class_session_id, student_id, rating, comment } = req.body
+router.post('/', requireAuth, async (req, res) => {
+  const { class_session_id, rating, comment } = req.body
   try {
     const { data, error } = await supabase
       .from('class_reviews')
       .insert([{
         class_session_id: parseInt(class_session_id),
-        student_id: parseInt(student_id),
+        student_id: req.userId,
         rating: parseInt(rating),
         comment
       }])
