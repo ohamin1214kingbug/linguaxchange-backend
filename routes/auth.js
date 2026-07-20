@@ -3,6 +3,7 @@ const router = express.Router()
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
 const { createClient } = require('@supabase/supabase-js')
+const { sendEmail } = require('../utils/mailer')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -113,7 +114,11 @@ router.post('/google-login', async (req, res) => {
         .from('credits')
         .insert([{ user_id: newUser.id, balance: 1 }])
 
-      console.log(`[EMAIL] New user registered via Google: ${email} — send welcome email`)
+      await sendEmail({
+        to: email,
+        subject: 'Welcome to LinguaXchange!',
+        text: `Hi ${first_name}, welcome to LinguaXchange! Your account is pending admin approval — we'll notify you once it's ready.`
+      })
 
       user = newUser
     }

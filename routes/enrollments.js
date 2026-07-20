@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { sendEmail } = require('../utils/mailer')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -87,7 +88,11 @@ router.post('/', async (req, res) => {
       .eq('id', user_id)
       .single()
 
-    console.log(`[EMAIL] Student joined class — to: ${teacher?.email}, subject: "A student joined '${cls?.title}'", body: "Hi ${teacher?.first_name}, ${student?.first_name} has joined your class."`)
+    await sendEmail({
+      to: teacher?.email,
+      subject: `A student joined '${cls?.title}'`,
+      text: `Hi ${teacher?.first_name}, ${student?.first_name} has joined your class.`
+    })
 
     res.status(201).json(data)
   } catch (e) {
