@@ -80,4 +80,55 @@ router.post('/login', async (req, res) => {
   }
 })
 
+// POST /api/auth/google-login
+router.post('/google-login', async (req, res) => {
+  const { email, name, google_id } = req.body
+
+  if (!email) return res.status(400).json({ error: 'Email required' })
+
+  try {
+    // Check if user already exists
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id, email, first_name, is_approved')
+      .eq('email', email)
+      .maybeSingle()
+
+    let user = existing
+
+    if (!user) {
+      const nameParts = (name || '').split(' ')
+      const first_name = nameParts[0] || ''
+      const last_name = nameParts.slice(1).join(' ') || ''
+
+      const { data: newUser, error } = await supabase
+        .from('users')
+        .insert([{ email, first_name, last_name, google_id, is_approved: false }])
+        .select('id, email, first_name, is_approved')
+        .single()
+
+      if (error) return res.status(400).json({ error: error.message })
+
+      await supabase
+        .from('credits')
+        .insert([{ user_id: newUser.id, balance: 1 }])
+
+      console.log(`[EMAIL] New user registered via Google: ${email} — send welcome email`)
+
+      user = newUser
+    }
+
+    const token = jwt.sign(
+      { userId: user.id },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    )
+
+    res.json({ token, user })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Google login failed' })
+  }
+})
+
 module.exports = router
