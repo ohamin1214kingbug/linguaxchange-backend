@@ -23,10 +23,6 @@ app.use('/api/enrollments', enrollmentRoutes)
 app.use('/api/reviews', reviewRoutes)
 app.use('/api/users', userRoutes)
 
-app.get('/api/_debug/admin-emails', (req, res) => {
-  res.json({ raw: JSON.stringify(process.env.ADMIN_EMAILS ?? null) })
-})
-
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
