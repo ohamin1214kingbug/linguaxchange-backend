@@ -25,6 +25,12 @@ app.use('/api/reviews', reviewRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/video', videoRoutes)
 
+app.get('/api/_debug/email', async (req, res) => {
+  const { sendEmailDebug } = require('./utils/mailer')
+  const result = await sendEmailDebug()
+  res.json(result)
+})
+
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
