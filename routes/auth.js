@@ -10,9 +10,15 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   const { email, password, first_name, last_name, nationality } = req.body
+
+  if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email' })
+  if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' })
+  if (!first_name || !last_name) return res.status(400).json({ error: 'First and last name are required' })
 
   try {
     const password_hash = await bcrypt.hash(password, 10)
@@ -46,6 +52,8 @@ router.post('/register', async (req, res) => {
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body
+
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
 
   try {
     const { data: user, error } = await supabase

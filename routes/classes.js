@@ -36,7 +36,21 @@ router.post('/', requireAuth, async (req, res) => {
     format, recurrence_type, materials, scheduled_at, meeting_link
   } = req.body
 
-  if (!scheduled_at) return res.status(400).json({ error: 'scheduled_at is required' })
+  if (!language_code || !level || !topic || !title) {
+    return res.status(400).json({ error: 'language_code, level, topic, and title are required' })
+  }
+  if (!scheduled_at || isNaN(new Date(scheduled_at).getTime())) {
+    return res.status(400).json({ error: 'A valid scheduled_at is required' })
+  }
+  if (new Date(scheduled_at).getTime() < Date.now()) {
+    return res.status(400).json({ error: 'scheduled_at must be in the future' })
+  }
+  if (!Number.isInteger(parseInt(max_students)) || parseInt(max_students) < 1) {
+    return res.status(400).json({ error: 'max_students must be a positive number' })
+  }
+  if (!Number.isInteger(parseInt(duration_minutes)) || parseInt(duration_minutes) < 1) {
+    return res.status(400).json({ error: 'duration_minutes must be a positive number' })
+  }
 
   try {
     const { data: cls, error } = await supabase
