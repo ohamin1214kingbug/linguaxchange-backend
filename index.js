@@ -9,6 +9,7 @@ const adminRoutes = require('./routes/admin')
 const enrollmentRoutes = require('./routes/enrollments')
 const reviewRoutes = require('./routes/reviews')
 const userRoutes = require('./routes/users')
+const videoRoutes = require('./routes/video')
 
 const app = express()
 
@@ -22,6 +23,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/enrollments', enrollmentRoutes)
 app.use('/api/reviews', reviewRoutes)
 app.use('/api/users', userRoutes)
+app.use('/api/video', videoRoutes)
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
