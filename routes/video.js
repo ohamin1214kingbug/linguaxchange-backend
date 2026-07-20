@@ -1,6 +1,6 @@
 const express = require('express')
 const router = express.Router()
-const jwt = require('jsonwebtoken')
+const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 
@@ -9,8 +9,8 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
-// POST /api/video/signature - generate a Zoom Video SDK join signature
-router.post('/signature', requireAuth, async (req, res) => {
+// POST /api/video/room - get the Jitsi room for a class session
+router.post('/room', requireAuth, async (req, res) => {
   const { class_session_id } = req.body
   if (!class_session_id) return res.status(400).json({ error: 'class_session_id is required' })
 
@@ -39,38 +39,29 @@ router.post('/signature', requireAuth, async (req, res) => {
       return res.status(403).json({ error: 'You are not part of this class' })
     }
 
-    if (!process.env.ZOOM_SDK_KEY || !process.env.ZOOM_SDK_SECRET) {
-      return res.status(503).json({ error: 'Video is not configured yet' })
-    }
+    const { data: user } = await supabase
+      .from('users')
+      .select('first_name, last_name')
+      .eq('id', req.userId)
+      .single()
 
-    const sessionName = `class-session-${class_session_id}`
-    const roleType = isTeacher ? 1 : 0
-    const iat = Math.round(Date.now() / 1000) - 30
-    const exp = iat + 60 * 60 * 2
-
-    const signature = jwt.sign(
-      {
-        app_key: process.env.ZOOM_SDK_KEY,
-        tpc: sessionName,
-        role_type: roleType,
-        version: 1,
-        iat,
-        exp
-      },
-      process.env.ZOOM_SDK_SECRET,
-      { algorithm: 'HS256' }
-    )
+    // Deterministic but unguessable room name, so outsiders on the public
+    // Jitsi server can't stumble into a class by scanning session ids.
+    const hash = crypto
+      .createHmac('sha256', process.env.JWT_SECRET)
+      .update(String(class_session_id))
+      .digest('hex')
+      .slice(0, 16)
 
     res.json({
-      signature,
-      sdkKey: process.env.ZOOM_SDK_KEY,
-      sessionName,
-      userIdentity: `user-${req.userId}`,
-      topic: session.classes.title
+      roomName: `linguaxchange-${class_session_id}-${hash}`,
+      displayName: `${user?.first_name || 'User'} ${user?.last_name || ''}`.trim(),
+      topic: session.classes.title,
+      isTeacher
     })
   } catch (e) {
     console.error(e)
-    res.status(500).json({ error: 'Could not generate video signature' })
+    res.status(500).json({ error: 'Could not get video room' })
   }
 })
 
