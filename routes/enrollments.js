@@ -24,33 +24,34 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Not enough credits' })
     }
 
-    // Find the next scheduled session for this class
-    const { data: session, error: sessionError } = await supabase
+    // Find the earliest scheduled session for this class the student hasn't already joined
+    // (a recurring class has multiple sessions, so this lets a student book each occurrence in turn)
+    const { data: sessions, error: sessionError } = await supabase
       .from('class_sessions')
-      .select()
+      .select('id')
       .eq('class_id', parseInt(class_id))
       .eq('status', 'scheduled')
       .order('session_date', { ascending: true })
-      .limit(1)
-      .maybeSingle()
 
     if (sessionError) {
       console.log('SESSION ERROR:', sessionError)
       return res.status(400).json({ error: sessionError.message })
     }
-    if (!session) {
+    if (!sessions || sessions.length === 0) {
       return res.status(400).json({ error: 'No scheduled session for this class' })
     }
 
-    const { data: existingEnrollment } = await supabase
+    const { data: myEnrollments } = await supabase
       .from('class_enrollments')
-      .select('id')
-      .eq('class_session_id', session.id)
+      .select('class_session_id')
       .eq('user_id', user_id)
-      .maybeSingle()
+      .in('class_session_id', sessions.map(s => s.id))
 
-    if (existingEnrollment) {
-      return res.status(400).json({ error: 'Already joined this class' })
+    const enrolledSessionIds = new Set((myEnrollments || []).map(e => e.class_session_id))
+    const session = sessions.find(s => !enrolledSessionIds.has(s.id))
+
+    if (!session) {
+      return res.status(400).json({ error: 'Already joined all upcoming occurrences of this class' })
     }
 
     // Enroll student

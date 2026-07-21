@@ -9,6 +9,29 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
+const MAX_RECURRING_SESSIONS = 52
+const RECURRENCE_STEP_DAYS = { weekly: 7, biweekly: 14 }
+
+function buildSessionDates(startDate, recurrenceType, endDate) {
+  const dates = [new Date(startDate)]
+  if (!recurrenceType || !endDate) return dates
+
+  const end = new Date(endDate)
+  let next = new Date(startDate)
+
+  while (dates.length < MAX_RECURRING_SESSIONS) {
+    next = new Date(next)
+    if (recurrenceType === 'monthly') {
+      next.setMonth(next.getMonth() + 1)
+    } else {
+      next.setDate(next.getDate() + (RECURRENCE_STEP_DAYS[recurrenceType] || 7))
+    }
+    if (next > end) break
+    dates.push(new Date(next))
+  }
+  return dates
+}
+
 router.get('/', async (req, res) => {
   try {
     const query = supabase
@@ -16,6 +39,7 @@ router.get('/', async (req, res) => {
       .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status)')
       .eq('status', 'approved')
       .order('created_at', { ascending: false })
+      .order('session_date', { foreignTable: 'class_sessions', ascending: true })
 
     if (req.query.teacher_id) {
       query.eq('teacher_id', req.query.teacher_id)
@@ -33,7 +57,7 @@ router.post('/', requireAuth, async (req, res) => {
   const {
     language_code, level, topic,
     title, description, max_students, duration_minutes,
-    format, recurrence_type, materials, scheduled_at, meeting_link
+    format, recurrence_type, recurrence_end_date, materials, scheduled_at, meeting_link
   } = req.body
 
   if (!language_code || !level || !topic || !title) {
@@ -51,6 +75,17 @@ router.post('/', requireAuth, async (req, res) => {
   if (!Number.isInteger(parseInt(duration_minutes)) || parseInt(duration_minutes) < 1) {
     return res.status(400).json({ error: 'duration_minutes must be a positive number' })
   }
+  if (format === 'recurring') {
+    if (!recurrence_type) {
+      return res.status(400).json({ error: 'recurrence_type is required for recurring classes' })
+    }
+    if (!recurrence_end_date || isNaN(new Date(recurrence_end_date).getTime())) {
+      return res.status(400).json({ error: 'A valid recurrence_end_date is required for recurring classes' })
+    }
+    if (new Date(recurrence_end_date).getTime() <= new Date(scheduled_at).getTime()) {
+      return res.status(400).json({ error: 'recurrence_end_date must be after scheduled_at' })
+    }
+  }
 
   try {
     const { data: cls, error } = await supabase
@@ -65,7 +100,8 @@ router.post('/', requireAuth, async (req, res) => {
         max_students: parseInt(max_students),
         duration_minutes: parseInt(duration_minutes),
         format,
-        recurrence_type: recurrence_type || null,
+        recurrence_type: format === 'recurring' ? recurrence_type : null,
+        recurrence_end_date: format === 'recurring' ? new Date(recurrence_end_date).toISOString() : null,
         materials: materials || null,
         zoom_meeting_link: meeting_link || null,
         status: 'pending'
@@ -78,21 +114,25 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: error.message })
     }
 
+    const sessionDates = format === 'recurring'
+      ? buildSessionDates(scheduled_at, recurrence_type, recurrence_end_date)
+      : [new Date(scheduled_at)]
+
     const { error: sessionError } = await supabase
       .from('class_sessions')
-      .insert([{
+      .insert(sessionDates.map(date => ({
         class_id: cls.id,
-        session_date: new Date(scheduled_at).toISOString(),
+        session_date: date.toISOString(),
         zoom_meeting_link: meeting_link || null,
         status: 'scheduled'
-      }])
+      })))
 
     if (sessionError) {
       console.log('SESSION ERROR:', sessionError)
       return res.status(400).json({ error: sessionError.message })
     }
 
-    res.status(201).json(cls)
+    res.status(201).json({ ...cls, sessionCount: sessionDates.length })
   } catch (e) {
     console.log('CATCH ERROR:', e.message)
     res.status(500).json({ error: e.message })
