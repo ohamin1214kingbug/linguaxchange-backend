@@ -25,6 +25,17 @@ app.use('/api/reviews', reviewRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/video', videoRoutes)
 
+app.get('/api/_debug/resend-key', (req, res) => {
+  const raw = process.env.RESEND_API_KEY
+  res.json({
+    present: raw !== undefined,
+    length: raw ? raw.length : 0,
+    looksLikeResendKey: raw ? raw.startsWith('re_') : false,
+    hasWhitespace: raw ? /\s/.test(raw) : null,
+    envKeyNamesContainingResend: Object.keys(process.env).filter(k => k.toLowerCase().includes('resend'))
+  })
+})
+
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
