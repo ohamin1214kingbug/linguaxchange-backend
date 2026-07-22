@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const bcrypt = require('bcrypt')
 const jwt = require('jsonwebtoken')
+const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 
@@ -11,6 +12,8 @@ const supabase = createClient(
 )
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const FRONTEND_URL = 'https://linguaxchange-frontend.vercel.app'
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
@@ -141,6 +144,78 @@ router.post('/google-login', async (req, res) => {
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Google login failed' })
+  }
+})
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body
+  if (!email) return res.status(400).json({ error: 'Email is required' })
+
+  const genericResponse = { message: 'If that email exists, a reset link has been sent.' }
+
+  try {
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, first_name, password_hash')
+      .eq('email', email)
+      .maybeSingle()
+
+    // Only users with a password (not Google-only accounts) can reset a password
+    if (!user || !user.password_hash) return res.json(genericResponse)
+
+    const rawToken = crypto.randomBytes(32).toString('hex')
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex')
+    const expires = new Date(Date.now() + RESET_TOKEN_TTL_MS)
+
+    await supabase
+      .from('users')
+      .update({ reset_token: hashedToken, reset_token_expires: expires.toISOString() })
+      .eq('id', user.id)
+
+    await sendEmail({
+      to: email,
+      subject: 'Reset your LinguaXchange password',
+      text: `Hi ${user.first_name}, click this link to reset your password: ${FRONTEND_URL}/auth/reset-password?token=${rawToken}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email.`
+    })
+
+    res.json(genericResponse)
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Could not process request' })
+  }
+})
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+  const { token, password } = req.body
+  if (!token || !password) return res.status(400).json({ error: 'Token and new password are required' })
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' })
+
+  try {
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, reset_token_expires')
+      .eq('reset_token', hashedToken)
+      .maybeSingle()
+
+    if (!user || !user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
+      return res.status(400).json({ error: 'This reset link is invalid or has expired' })
+    }
+
+    const password_hash = await bcrypt.hash(password, 10)
+
+    await supabase
+      .from('users')
+      .update({ password_hash, reset_token: null, reset_token_expires: null })
+      .eq('id', user.id)
+
+    res.json({ message: 'Password updated successfully' })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Could not reset password' })
   }
 })
 
