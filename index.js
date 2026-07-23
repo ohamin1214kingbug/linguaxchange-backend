@@ -10,7 +10,6 @@ const enrollmentRoutes = require('./routes/enrollments')
 const reviewRoutes = require('./routes/reviews')
 const userRoutes = require('./routes/users')
 const videoRoutes = require('./routes/video')
-const { requireAuth, requireAdmin } = require('./middleware/auth')
 
 const app = express()
 
@@ -25,17 +24,6 @@ app.use('/api/enrollments', enrollmentRoutes)
 app.use('/api/reviews', reviewRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/video', videoRoutes)
-
-app.get('/api/_debug/resend-key', requireAuth, requireAdmin, (req, res) => {
-  const raw = process.env.RESEND_API_KEY
-  res.json({
-    present: raw !== undefined,
-    length: raw ? raw.length : 0,
-    looksLikeResendKey: raw ? raw.startsWith('re_') : false,
-    hasWhitespace: raw ? /\s/.test(raw) : null,
-    allEnvKeyNames: Object.keys(process.env).sort()
-  })
-})
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {

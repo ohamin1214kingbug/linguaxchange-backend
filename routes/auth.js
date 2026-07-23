@@ -173,13 +173,13 @@ router.post('/forgot-password', async (req, res) => {
       .update({ reset_token: hashedToken, reset_token_expires: expires.toISOString() })
       .eq('id', user.id)
 
-    const emailResult = await sendEmail({
+    await sendEmail({
       to: email,
       subject: 'Reset your LinguaXchange password',
       text: `Hi ${user.first_name}, click this link to reset your password: ${FRONTEND_URL}/auth/reset-password?token=${rawToken}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email.`
     })
 
-    res.json({ ...genericResponse, debugEmailResult: emailResult })
+    res.json(genericResponse)
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Could not process request' })
