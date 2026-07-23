@@ -3,34 +3,12 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { sendEmail } = require('../utils/mailer')
+const { buildSessionDates } = require('../utils/sessionDates')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 )
-
-const MAX_RECURRING_SESSIONS = 52
-const RECURRENCE_STEP_DAYS = { weekly: 7, biweekly: 14 }
-
-function buildSessionDates(startDate, recurrenceType, endDate) {
-  const dates = [new Date(startDate)]
-  if (!recurrenceType || !endDate) return dates
-
-  const end = new Date(endDate)
-  let next = new Date(startDate)
-
-  while (dates.length < MAX_RECURRING_SESSIONS) {
-    next = new Date(next)
-    if (recurrenceType === 'monthly') {
-      next.setMonth(next.getMonth() + 1)
-    } else {
-      next.setDate(next.getDate() + (RECURRENCE_STEP_DAYS[recurrenceType] || 7))
-    }
-    if (next > end) break
-    dates.push(new Date(next))
-  }
-  return dates
-}
 
 router.get('/', async (req, res) => {
   try {

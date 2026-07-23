@@ -1,8 +1,8 @@
 const express = require('express')
 const router = express.Router()
-const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
+const { buildRoomName } = require('../utils/roomName')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -45,16 +45,8 @@ router.post('/room', requireAuth, async (req, res) => {
       .eq('id', req.userId)
       .single()
 
-    // Deterministic but unguessable room name, so outsiders on the public
-    // Jitsi server can't stumble into a class by scanning session ids.
-    const hash = crypto
-      .createHmac('sha256', process.env.JWT_SECRET)
-      .update(String(class_session_id))
-      .digest('hex')
-      .slice(0, 16)
-
     res.json({
-      roomName: `linguaxchange-${class_session_id}-${hash}`,
+      roomName: buildRoomName(class_session_id, process.env.JWT_SECRET),
       displayName: `${user?.first_name || 'User'} ${user?.last_name || ''}`.trim(),
       topic: session.classes.title,
       isTeacher

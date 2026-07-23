@@ -3,6 +3,7 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 const { requireAuth } = require('../middleware/auth')
+const { pickNextUnjoinedSession } = require('../utils/pickSession')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -47,8 +48,7 @@ router.post('/', requireAuth, async (req, res) => {
       .eq('user_id', user_id)
       .in('class_session_id', sessions.map(s => s.id))
 
-    const enrolledSessionIds = new Set((myEnrollments || []).map(e => e.class_session_id))
-    const session = sessions.find(s => !enrolledSessionIds.has(s.id))
+    const session = pickNextUnjoinedSession(sessions, (myEnrollments || []).map(e => e.class_session_id))
 
     if (!session) {
       return res.status(400).json({ error: 'Already joined all upcoming occurrences of this class' })
