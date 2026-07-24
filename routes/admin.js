@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
+const { recordWeeklyActivity } = require('../utils/streak')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -81,6 +82,9 @@ router.post('/classes/:id/complete', async (req, res) => {
       .from('classes')
       .update({ status: 'completed' })
       .eq('id', req.params.id)
+
+    // Teacher taught a class this week — counts toward their weekly activity streak
+    await recordWeeklyActivity(cls.teacher_id)
 
     // Give teacher exactly 1 credit
     const { data: teacherCredit } = await supabase

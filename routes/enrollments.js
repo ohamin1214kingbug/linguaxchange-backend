@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 const { requireAuth } = require('../middleware/auth')
 const { pickNextUnjoinedSession } = require('../utils/pickSession')
+const { recordWeeklyActivity } = require('../utils/streak')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -130,6 +131,9 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
       .single()
 
     if (error) return res.status(400).json({ error: error.message })
+
+    // Student attended a class this week — counts toward their weekly activity streak
+    await recordWeeklyActivity(user_id)
 
     const { data: session } = await supabase
       .from('class_sessions')
