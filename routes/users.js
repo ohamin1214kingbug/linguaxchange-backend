@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
+const { getEarnedBadges } = require('../utils/badges')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -18,7 +19,9 @@ router.get('/:id', async (req, res) => {
       .single()
 
     if (error) return res.status(404).json({ error: 'User not found' })
-    res.json(data)
+
+    const badges = await getEarnedBadges(req.params.id)
+    res.json({ ...data, badges })
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch user' })
   }
