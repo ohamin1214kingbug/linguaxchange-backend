@@ -10,6 +10,7 @@ const enrollmentRoutes = require('./routes/enrollments')
 const reviewRoutes = require('./routes/reviews')
 const userRoutes = require('./routes/users')
 const videoRoutes = require('./routes/video')
+const cronRoutes = require('./routes/cron')
 
 const app = express()
 
@@ -24,6 +25,7 @@ app.use('/api/enrollments', enrollmentRoutes)
 app.use('/api/reviews', reviewRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/video', videoRoutes)
+app.use('/api/cron', cronRoutes)
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
