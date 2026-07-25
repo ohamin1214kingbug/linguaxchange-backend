@@ -5,6 +5,7 @@ const { sendEmail } = require('../utils/mailer')
 const { requireAuth } = require('../middleware/auth')
 const { pickNextUnjoinedSession } = require('../utils/pickSession')
 const { recordWeeklyActivity } = require('../utils/streak')
+const { maybeSendLowCreditNudge, resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -87,6 +88,10 @@ router.post('/', requireAuth, async (req, res) => {
         description: 'Joined a class'
       }])
 
+    // Credit was just spent (not an admin/refund adjustment) — the right
+    // trigger point for the low-credit nudge
+    await maybeSendLowCreditNudge(user_id, credit.balance - 1)
+
     const { data: cls } = await supabase
       .from('classes')
       .select('title, teacher_id')
@@ -153,9 +158,11 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
       .eq('user_id', cls.teacher_id)
       .single()
 
+    const newTeacherBalance = (teacherCredit?.balance || 0) + 1
+
     await supabase
       .from('credits')
-      .update({ balance: (teacherCredit?.balance || 0) + 1 })
+      .update({ balance: newTeacherBalance })
       .eq('user_id', cls.teacher_id)
 
     await supabase
@@ -166,6 +173,9 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
         type: 'earned',
         description: 'Student confirmed attendance'
       }])
+
+    // Teacher just topped up — clears the low-credit flag if they're back above threshold
+    await resetLowCreditNotificationIfToppedUp(cls.teacher_id, newTeacherBalance)
 
     res.json({ success: true })
   } catch (e) {

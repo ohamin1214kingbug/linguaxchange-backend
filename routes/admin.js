@@ -3,6 +3,7 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { recordWeeklyActivity } = require('../utils/streak')
+const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -93,9 +94,11 @@ router.post('/classes/:id/complete', async (req, res) => {
       .eq('user_id', cls.teacher_id)
       .single()
 
+    const newTeacherBalance = (teacherCredit?.balance || 0) + 1
+
     await supabase
       .from('credits')
-      .update({ balance: (teacherCredit?.balance || 0) + 1 })
+      .update({ balance: newTeacherBalance })
       .eq('user_id', cls.teacher_id)
 
     // Record the transaction
@@ -108,6 +111,9 @@ router.post('/classes/:id/complete', async (req, res) => {
         description: 'Taught a class',
         related_class_id: parseInt(req.params.id)
       }])
+
+    // Teacher just topped up — clears the low-credit flag if they're back above threshold
+    await resetLowCreditNotificationIfToppedUp(cls.teacher_id, newTeacherBalance)
 
     res.json({ success: true })
   } catch (e) {
