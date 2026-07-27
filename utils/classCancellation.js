@@ -1,0 +1,101 @@
+const { createClient } = require('@supabase/supabase-js')
+const { sendEmail } = require('./mailer')
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+)
+
+// Pure. A class can only be edited or cancelled while it still has at least
+// one scheduled session in the future — once everything's already happened
+// or been cancelled, there's nothing left to change.
+function hasFutureSession(sessions, now = new Date()) {
+  return (sessions || []).some(s => s.status === 'scheduled' && new Date(s.session_date) > now)
+}
+
+// Cancels a class: marks the class and all its still-scheduled future
+// sessions 'cancelled' (the reminder cron filters on class_sessions.status
+// = 'scheduled', so this is what actually stops reminders from firing —
+// classes.status alone wouldn't do that), refunds every student currently
+// booked into one of those sessions, and emails them. Idempotent: calling
+// this on an already-cancelled class is a no-op, not an error or a second
+// refund round — checked via the class's own status, not a separate lock.
+//
+// No waitlist cascade here — there's no waitlist feature anywhere in this
+// codebase to cascade to.
+async function cancelClass(classId, cls) {
+  if (cls.status === 'cancelled') {
+    return { alreadyCancelled: true, refundedCount: 0 }
+  }
+
+  const now = new Date()
+
+  const { data: sessions } = await supabase
+    .from('class_sessions')
+    .select('id, session_date, status')
+    .eq('class_id', classId)
+
+  const futureSessionIds = (sessions || [])
+    .filter(s => s.status === 'scheduled' && new Date(s.session_date) > now)
+    .map(s => s.id)
+
+  await supabase
+    .from('classes')
+    .update({ status: 'cancelled' })
+    .eq('id', classId)
+
+  if (futureSessionIds.length > 0) {
+    await supabase
+      .from('class_sessions')
+      .update({ status: 'cancelled' })
+      .in('id', futureSessionIds)
+  }
+
+  let refundedCount = 0
+  if (futureSessionIds.length > 0) {
+    const { data: enrollments } = await supabase
+      .from('class_enrollments')
+      .select('id, user_id, users(email, first_name)')
+      .in('class_session_id', futureSessionIds)
+      .eq('status', 'confirmed')
+
+    for (const enrollment of enrollments || []) {
+      try {
+        const { data: credit } = await supabase
+          .from('credits')
+          .select('balance')
+          .eq('user_id', enrollment.user_id)
+          .single()
+
+        await supabase
+          .from('credits')
+          .update({ balance: (credit?.balance || 0) + 1 })
+          .eq('user_id', enrollment.user_id)
+
+        await supabase
+          .from('credit_transactions')
+          .insert([{
+            user_id: enrollment.user_id,
+            amount: 1,
+            type: 'refunded',
+            description: 'Class cancelled',
+            related_class_id: classId
+          }])
+
+        await sendEmail({
+          to: enrollment.users?.email,
+          subject: `'${cls.title}' has been cancelled`,
+          text: `Hi ${enrollment.users?.first_name || ''}, the class '${cls.title}' has been cancelled by the teacher. Your credit has been refunded.`
+        })
+
+        refundedCount++
+      } catch (e) {
+        console.error('[CLASS_CANCEL] Failed to refund/notify enrollment', enrollment.id, e.message)
+      }
+    }
+  }
+
+  return { alreadyCancelled: false, refundedCount }
+}
+
+module.exports = { hasFutureSession, cancelClass }

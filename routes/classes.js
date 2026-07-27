@@ -1,9 +1,10 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { requireAuth, requireAdmin } = require('../middleware/auth')
+const { requireAuth, requireAdmin, isAdmin } = require('../middleware/auth')
 const { sendEmail } = require('../utils/mailer')
 const { buildSessionDates } = require('../utils/sessionDates')
+const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -155,6 +156,97 @@ router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not reject class' })
+  }
+})
+
+// PATCH /api/classes/:id — title/description only. Time changes aren't
+// supported here: with bookings possible and classes.status not having a
+// per-time-slot concept once a class is recurring, the safer v1 answer is
+// to force cancel + repost instead of allowing a time edit that could
+// silently pull the rug out from under someone who already booked a slot.
+router.patch('/:id', requireAuth, async (req, res) => {
+  const { title, description } = req.body
+  try {
+    const { data: cls, error } = await supabase
+      .from('classes')
+      .select('id, teacher_id, status')
+      .eq('id', req.params.id)
+      .single()
+
+    if (error || !cls) return res.status(404).json({ error: 'Class not found' })
+
+    if (req.userId !== cls.teacher_id && !(await isAdmin(req.userId))) {
+      return res.status(403).json({ error: 'Only the teacher who created this class (or an admin) can edit it' })
+    }
+    if (cls.status === 'cancelled') {
+      return res.status(400).json({ error: 'This class has been cancelled and cannot be edited' })
+    }
+
+    const { data: sessions } = await supabase
+      .from('class_sessions')
+      .select('id, session_date, status')
+      .eq('class_id', cls.id)
+
+    if (!hasFutureSession(sessions)) {
+      return res.status(400).json({ error: 'This class has already happened and cannot be edited' })
+    }
+
+    const updates = {}
+    if (title !== undefined) updates.title = title
+    if (description !== undefined) updates.description = description
+
+    const { data: updated, error: updateError } = await supabase
+      .from('classes')
+      .update(updates)
+      .eq('id', cls.id)
+      .select()
+      .single()
+
+    if (updateError) return res.status(400).json({ error: updateError.message })
+    res.json(updated)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not update class' })
+  }
+})
+
+// POST /api/classes/:id/cancel
+// Idempotent — cancelling an already-cancelled class just returns success
+// with refundedCount: 0 rather than erroring or refunding a second time
+// (see utils/classCancellation.js). Side effects (refund, notify, cascade
+// to class_sessions so the reminder cron stops picking these up) all live
+// there rather than in a plain status-field PATCH, since cancellation does
+// a lot more than flip one column.
+router.post('/:id/cancel', requireAuth, async (req, res) => {
+  try {
+    const { data: cls, error } = await supabase
+      .from('classes')
+      .select('id, title, teacher_id, status')
+      .eq('id', req.params.id)
+      .single()
+
+    if (error || !cls) return res.status(404).json({ error: 'Class not found' })
+
+    if (req.userId !== cls.teacher_id && !(await isAdmin(req.userId))) {
+      return res.status(403).json({ error: 'Only the teacher who created this class (or an admin) can cancel it' })
+    }
+
+    if (cls.status !== 'cancelled') {
+      const { data: sessions } = await supabase
+        .from('class_sessions')
+        .select('id, session_date, status')
+        .eq('class_id', cls.id)
+
+      if (!hasFutureSession(sessions)) {
+        return res.status(400).json({ error: 'This class has already happened and cannot be cancelled' })
+      }
+    }
+
+    const result = await cancelClass(cls.id, cls)
+    res.json({ success: true, ...result })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not cancel class' })
   }
 })
 

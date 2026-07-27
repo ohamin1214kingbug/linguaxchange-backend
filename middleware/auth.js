@@ -43,4 +43,19 @@ async function requireAdmin(req, res, next) {
   }
 }
 
-module.exports = { requireAuth, requireAdmin }
+// Boolean check (not middleware) for routes that need "owner OR admin"
+// rather than "admin only" — e.g. a teacher editing their own class.
+async function isAdmin(userId) {
+  try {
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', userId)
+      .single()
+    return !error && !!user && ADMIN_EMAILS.includes(user.email.toLowerCase())
+  } catch (e) {
+    return false
+  }
+}
+
+module.exports = { requireAuth, requireAdmin, isAdmin }
