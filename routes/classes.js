@@ -5,28 +5,44 @@ const { requireAuth, requireAdmin, isAdmin } = require('../middleware/auth')
 const { sendEmail } = require('../utils/mailer')
 const { buildSessionDates } = require('../utils/sessionDates')
 const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
+const { sortBySoonest } = require('../utils/classSearch')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 )
 
+// GET /api/classes — all filters compose (AND together). q does a simple
+// case-insensitive substring match on title/description; full-text-search
+// infra would be overkill at this scale. Default (and only) sort is
+// soonest-upcoming-session-first, computed in utils/classSearch.js since
+// PostgREST can't order a parent query by a child table's aggregate.
 router.get('/', async (req, res) => {
   try {
-    const query = supabase
+    let query = supabase
       .from('classes')
       .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status)')
       .eq('status', 'approved')
-      .order('created_at', { ascending: false })
       .order('session_date', { foreignTable: 'class_sessions', ascending: true })
 
     if (req.query.teacher_id) {
-      query.eq('teacher_id', req.query.teacher_id)
+      query = query.eq('teacher_id', req.query.teacher_id)
+    }
+    if (req.query.language_code) {
+      query = query.eq('language_code', req.query.language_code)
+    }
+    if (req.query.level) {
+      query = query.eq('level', req.query.level)
+    }
+    if (req.query.q) {
+      // strip characters that have special meaning in PostgREST's .or() filter syntax
+      const term = `%${req.query.q.replace(/[(),]/g, '')}%`
+      query = query.or(`title.ilike.${term},description.ilike.${term}`)
     }
 
     const { data, error } = await query
     if (error) return res.status(400).json({ error: error.message })
-    res.json(data)
+    res.json(sortBySoonest(data || []))
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch classes' })
   }
