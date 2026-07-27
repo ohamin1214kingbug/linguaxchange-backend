@@ -20,11 +20,9 @@ function computeReminderWindow(now = new Date()) {
 }
 
 // Pure. `timezone` is an IANA zone name (e.g. "Asia/Seoul") from the user's
-// profile. Feature 3 (timezone detection/storage) doesn't exist yet, so every
-// caller today passes undefined — this falls back to UTC and says so
-// explicitly, per spec, rather than guessing. Once Feature 3 ships, callers
-// just start passing a real value and this starts rendering local times with
-// no changes needed here.
+// profile — falls back to UTC (and says so explicitly, per spec, rather
+// than guessing) for a user whose timezone hasn't been detected yet, e.g.
+// they haven't logged in since this shipped.
 function formatSessionTime(sessionDateISO, timezone) {
   const isUtcFallback = !timezone
   const zone = timezone || 'UTC'
@@ -91,18 +89,22 @@ async function sendClassReminders(now = new Date()) {
 
         const { data: teacher } = await supabase
           .from('users')
-          .select('email, first_name')
+          .select('email, first_name, timezone')
           .eq('id', cls.teacher_id)
           .single()
 
         const { data: enrollments } = await supabase
           .from('class_enrollments')
-          .select('users(email, first_name)')
+          .select('users(email, first_name, timezone)')
           .eq('class_session_id', session.id)
 
         const students = (enrollments || []).map(e => e.users).filter(Boolean)
         const joinLink = `${FRONTEND_URL}/classroom/${session.id}`
-        const time = formatSessionTime(session.session_date, undefined)
+
+        // Each recipient's email renders in THEIR OWN stored timezone, not
+        // one shared time for the whole session — a teacher and their
+        // students can easily be in different zones.
+        const teacherTime = formatSessionTime(session.session_date, teacher?.timezone)
 
         // Teacher side: role-appropriate ("with [student]" only when unambiguous)
         const withWho = students.length === 0
@@ -112,16 +114,17 @@ async function sendClassReminders(now = new Date()) {
             : ` with ${students.length} students`
 
         await sendReminderEmail(teacher?.email, teacher?.first_name, 'Your class starts in 1 hour', [
-          `Your class '${cls.title}'${withWho} starts in about 1 hour, at ${time.display}.`,
-          time.note || '',
+          `Your class '${cls.title}'${withWho} starts in about 1 hour, at ${teacherTime.display}.`,
+          teacherTime.note || '',
           `Join here: ${joinLink}`
         ].filter(Boolean))
         if (teacher?.email) summary.remindersSent++
 
         for (const student of students) {
+          const studentTime = formatSessionTime(session.session_date, student.timezone)
           await sendReminderEmail(student.email, student.first_name, 'Your class starts in 1 hour', [
-            `Your class with ${teacher?.first_name || 'your teacher'} starts in about 1 hour, at ${time.display}.`,
-            time.note || '',
+            `Your class with ${teacher?.first_name || 'your teacher'} starts in about 1 hour, at ${studentTime.display}.`,
+            studentTime.note || '',
             `Join here: ${joinLink}`
           ].filter(Boolean))
           if (student.email) summary.remindersSent++
