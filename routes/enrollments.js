@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/auth')
 const { pickNextUnjoinedSession } = require('../utils/pickSession')
 const { recordWeeklyActivity } = require('../utils/streak')
 const { maybeSendLowCreditNudge, resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
+const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -25,6 +26,14 @@ router.post('/', requireAuth, async (req, res) => {
 
     if (!credit || credit.balance < 1) {
       return res.status(400).json({ error: 'Not enough credits' })
+    }
+
+    // Don't let a purely-consuming user drain their entire starting grant
+    // without ever teaching — this would be their last credit
+    if (blocksSpend(credit.balance - 1, await hasEverTaught(user_id))) {
+      return res.status(400).json({
+        error: "This would use your last credit. Teach a class first to keep earning credits — head to Classes to create one."
+      })
     }
 
     // Find the earliest scheduled session for this class the student hasn't already joined
