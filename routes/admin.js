@@ -3,7 +3,6 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { recordWeeklyActivity } = require('../utils/streak')
-const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -65,6 +64,12 @@ router.post('/users/:id/reject', async (req, res) => {
 })
 
 // POST /api/admin/classes/:id/complete
+// Record-keeping/moderation only — does NOT grant credit. Credit is earned
+// solely via students confirming attendance (routes/enrollments.js
+// POST /:id/confirm), which scales with how many students the teacher
+// actually served instead of paying a flat amount regardless of class size.
+// This still drives the teacher's weekly streak and the badges "taught"
+// count, both of which key off classes.status = 'completed', not credits.
 router.post('/classes/:id/complete', async (req, res) => {
   try {
     // Get the class to find the teacher
@@ -86,34 +91,6 @@ router.post('/classes/:id/complete', async (req, res) => {
 
     // Teacher taught a class this week — counts toward their weekly activity streak
     await recordWeeklyActivity(cls.teacher_id)
-
-    // Give teacher exactly 1 credit
-    const { data: teacherCredit } = await supabase
-      .from('credits')
-      .select('balance')
-      .eq('user_id', cls.teacher_id)
-      .single()
-
-    const newTeacherBalance = (teacherCredit?.balance || 0) + 1
-
-    await supabase
-      .from('credits')
-      .update({ balance: newTeacherBalance })
-      .eq('user_id', cls.teacher_id)
-
-    // Record the transaction
-    await supabase
-      .from('credit_transactions')
-      .insert([{
-        user_id: cls.teacher_id,
-        amount: 1,
-        type: 'earned',
-        description: 'Taught a class',
-        related_class_id: parseInt(req.params.id)
-      }])
-
-    // Teacher just topped up — clears the low-credit flag if they're back above threshold
-    await resetLowCreditNotificationIfToppedUp(cls.teacher_id, newTeacherBalance)
 
     res.json({ success: true })
   } catch (e) {

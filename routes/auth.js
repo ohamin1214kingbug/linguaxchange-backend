@@ -14,6 +14,9 @@ const supabase = createClient(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const FRONTEND_URL = 'https://linguaxchange-frontend.vercel.app'
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
+// Enough to attend a few classes before a new user hits 0 and needs to
+// teach (or buy, once that exists) to keep participating.
+const SIGNUP_CREDIT_GRANT = 3
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
@@ -36,7 +39,7 @@ router.post('/register', async (req, res) => {
 
     await supabase
       .from('credits')
-      .insert([{ user_id: newUser.id, balance: 1 }])
+      .insert([{ user_id: newUser.id, balance: SIGNUP_CREDIT_GRANT }])
 
     const token = jwt.sign(
       { userId: newUser.id },
@@ -123,7 +126,7 @@ router.post('/google-login', async (req, res) => {
 
       await supabase
         .from('credits')
-        .insert([{ user_id: newUser.id, balance: 1 }])
+        .insert([{ user_id: newUser.id, balance: SIGNUP_CREDIT_GRANT }])
 
       await sendEmail({
         to: email,
