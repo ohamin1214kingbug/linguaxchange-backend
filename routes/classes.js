@@ -6,6 +6,7 @@ const { sendEmail } = require('../utils/mailer')
 const { buildSessionDates } = require('../utils/sessionDates')
 const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
 const { sortBySoonest } = require('../utils/classSearch')
+const { initialClassStatus, getTeacherIsApproved } = require('../utils/classApproval')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -83,6 +84,8 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   try {
+    const teacherIsApproved = await getTeacherIsApproved(req.userId)
+
     const { data: cls, error } = await supabase
       .from('classes')
       .insert([{
@@ -99,7 +102,7 @@ router.post('/', requireAuth, async (req, res) => {
         recurrence_end_date: format === 'recurring' ? new Date(recurrence_end_date).toISOString() : null,
         materials: materials || null,
         zoom_meeting_link: meeting_link || null,
-        status: 'pending'
+        status: initialClassStatus(teacherIsApproved)
       }])
       .select()
       .single()
