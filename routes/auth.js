@@ -110,6 +110,7 @@ router.post('/google-login', async (req, res) => {
       .maybeSingle()
 
     let user = existing
+    const isNewUser = !existing
 
     if (!user) {
       const nameParts = (name || '').split(' ')
@@ -143,7 +144,7 @@ router.post('/google-login', async (req, res) => {
       { expiresIn: '7d' }
     )
 
-    res.json({ token, user })
+    res.json({ token, user, isNewUser })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Google login failed' })
