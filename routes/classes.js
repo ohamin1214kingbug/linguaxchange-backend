@@ -60,10 +60,10 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'language_code, level, topic, and title are required' })
   }
   if (!scheduled_at || isNaN(new Date(scheduled_at).getTime())) {
-    return res.status(400).json({ error: 'A valid scheduled_at is required' })
+    return res.status(400).json({ error: 'A valid scheduled_at is required', field: 'scheduled_at' })
   }
-  if (new Date(scheduled_at).getTime() < Date.now()) {
-    return res.status(400).json({ error: 'scheduled_at must be in the future' })
+  if (new Date(scheduled_at).getTime() <= Date.now()) {
+    return res.status(400).json({ error: 'This time has already passed. Please pick a future time.', field: 'scheduled_at' })
   }
   if (!Number.isInteger(parseInt(max_students)) || parseInt(max_students) < 1) {
     return res.status(400).json({ error: 'max_students must be a positive number' })
