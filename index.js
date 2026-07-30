@@ -1,5 +1,6 @@
 const express = require('express')
 const cors = require('cors')
+const helmet = require('helmet')
 require('dotenv').config()
 
 const authRoutes = require('./routes/auth')
@@ -19,8 +20,30 @@ const app = express()
 // req.ip generally) to see the real client IP instead of Railway's own.
 app.set('trust proxy', 1)
 
-app.use(cors())
-app.use(express.json())
+app.use(helmet())
+
+// Only the actual frontends should be able to call this API from a
+// browser — cors() with no options reflects any origin, which lets any
+// website script requests against this API using a visitor's own browser.
+const ALLOWED_ORIGINS = [
+  'https://linguaxchange.com',
+  'https://www.linguaxchange.com',
+  'https://linguaxchange-frontend.vercel.app',
+  'http://localhost:3000'
+]
+app.use(cors({
+  origin: (origin, callback) => {
+    // No Origin header (server-to-server calls, curl, the cron pinger) —
+    // let it through since there's no browser same-origin policy to enforce.
+    // Reject with `false` rather than an Error — CORS is enforced by the
+    // browser refusing to read the response, not by the server blocking
+    // it, so there's nothing to 500 over. An Error here would just leak a
+    // stack trace instead of the standard "no CORS headers" outcome.
+    callback(null, !origin || ALLOWED_ORIGINS.includes(origin))
+  }
+}))
+
+app.use(express.json({ limit: '100kb' }))
 
 app.use('/api/auth', authRoutes)
 app.use('/api/classes', classRoutes)
