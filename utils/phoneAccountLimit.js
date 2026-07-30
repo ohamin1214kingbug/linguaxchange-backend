@@ -8,8 +8,8 @@ const supabase = createClient(
 // Caps how many accounts can share one verified phone number. Closes the
 // loophole of creating disposable accounts (Google or email/password) just
 // to re-farm the signup credit grant, since a real attacker only ever has
-// one or two real phones to verify with.
-const MAX_ACCOUNTS_PER_PHONE = 2
+// one real phone to verify with.
+const MAX_ACCOUNTS_PER_PHONE = 1
 
 async function phoneAccountLimitReached(phone_number) {
   const { count, error } = await supabase
