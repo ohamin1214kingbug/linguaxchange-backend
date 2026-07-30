@@ -6,7 +6,8 @@ const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
-const { loginLimiter, registerLimiter } = require('../middleware/rateLimit')
+const { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter } = require('../middleware/rateLimit')
+const { sendOtp, checkOtp, isValidPhoneNumber } = require('../utils/phoneVerify')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -16,6 +17,9 @@ const supabase = createClient(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const FRONTEND_URL = 'https://linguaxchange-frontend.vercel.app'
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
+// Long enough to finish the rest of the registration form after verifying,
+// short enough that a leaked token can't be replayed much later.
+const PHONE_VERIFIED_TOKEN_TTL = '15m'
 // Enough to attend a few classes before a new user hits 0 and needs to
 // teach (or buy, once that exists) to keep participating.
 const SIGNUP_CREDIT_GRANT = 3
@@ -57,6 +61,47 @@ router.post('/register', registerLimiter, async (req, res) => {
     console.error(error)
     res.status(500).json({ error: 'Registration failed' })
   }
+})
+
+// POST /api/auth/send-otp — first half of phone verification for
+// email/password signup. Google signup skips this since Google already
+// verified the account owner's identity.
+router.post('/send-otp', otpSendLimiter, async (req, res) => {
+  const { phone_number } = req.body
+  if (!isValidPhoneNumber(phone_number)) {
+    return res.status(400).json({ error: 'Enter a valid phone number in international format, e.g. +14155551234' })
+  }
+
+  const result = await sendOtp(phone_number)
+  if (!result.ok) {
+    console.error('[SEND_OTP]', result.error)
+    return res.status(400).json({ error: 'Could not send verification code. Please check the number and try again.' })
+  }
+  res.json({ success: true })
+})
+
+// POST /api/auth/verify-otp — second half. Twilio consumes the code on
+// check rather than persisting a "verified" flag, so on success this signs
+// a short-lived token binding that specific phone number; /register
+// requires and re-verifies this token rather than trusting a client-supplied
+// "I verified" boolean.
+router.post('/verify-otp', otpCheckLimiter, async (req, res) => {
+  const { phone_number, code } = req.body
+  if (!isValidPhoneNumber(phone_number) || !code) {
+    return res.status(400).json({ error: 'Phone number and code are required' })
+  }
+
+  const result = await checkOtp(phone_number, code)
+  if (!result.ok) {
+    return res.status(400).json({ error: 'Invalid or expired code' })
+  }
+
+  const verified_token = jwt.sign(
+    { phone_number, purpose: 'phone_verified' },
+    process.env.JWT_SECRET,
+    { expiresIn: PHONE_VERIFIED_TOKEN_TTL }
+  )
+  res.json({ verified_token })
 })
 
 // POST /api/auth/login

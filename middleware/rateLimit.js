@@ -21,4 +21,23 @@ const registerLimiter = rateLimit({
   message: { error: 'Too many accounts created from this network. Please try again later.' }
 })
 
-module.exports = { loginLimiter, registerLimiter }
+// Each send costs real money (Twilio's per-verification fee), so this is
+// tighter than the other limiters — it's the one endpoint where letting
+// requests through unchecked has a direct dollar cost, not just abuse risk.
+const otpSendLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many verification codes requested. Please try again later.' }
+})
+
+const otpCheckLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please request a new code and try again.' }
+})
+
+module.exports = { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter }
