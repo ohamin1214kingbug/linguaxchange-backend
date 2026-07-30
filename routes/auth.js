@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
+const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -40,6 +41,8 @@ router.post('/register', async (req, res) => {
     await supabase
       .from('credits')
       .insert([{ user_id: newUser.id, balance: SIGNUP_CREDIT_GRANT }])
+
+    await notifyAdminsOfPendingUser(newUser)
 
     const token = jwt.sign(
       { userId: newUser.id },
@@ -134,6 +137,8 @@ router.post('/google-login', async (req, res) => {
         subject: 'Welcome to LinguaXchange!',
         text: `Hi ${first_name}, welcome to LinguaXchange! Your account is pending admin approval — we'll notify you once it's ready.`
       })
+
+      await notifyAdminsOfPendingUser(newUser)
 
       user = newUser
     }
