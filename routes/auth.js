@@ -26,18 +26,32 @@ const SIGNUP_CREDIT_GRANT = 3
 
 // POST /api/auth/register
 router.post('/register', registerLimiter, async (req, res) => {
-  const { email, password, first_name, last_name, nationality } = req.body
+  const { email, password, first_name, last_name, nationality, phone_number, verified_token } = req.body
 
   if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email' })
   if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' })
   if (!first_name || !last_name) return res.status(400).json({ error: 'First and last name are required' })
+
+  // Require proof of the phone-verification step (see /send-otp, /verify-otp)
+  // rather than trusting a client-supplied "verified" flag directly.
+  if (!phone_number || !verified_token) {
+    return res.status(400).json({ error: 'Phone verification is required' })
+  }
+  try {
+    const payload = jwt.verify(verified_token, process.env.JWT_SECRET)
+    if (payload.purpose !== 'phone_verified' || payload.phone_number !== phone_number) {
+      return res.status(400).json({ error: 'Phone verification does not match' })
+    }
+  } catch (e) {
+    return res.status(400).json({ error: 'Phone verification has expired. Please verify again.' })
+  }
 
   try {
     const password_hash = await bcrypt.hash(password, 10)
 
     const { data: newUser, error } = await supabase
       .from('users')
-      .insert([{ email, password_hash, first_name, last_name, nationality }])
+      .insert([{ email, password_hash, first_name, last_name, nationality, phone_number, phone_verified: true }])
       .select('id, email, first_name')
       .single()
 
