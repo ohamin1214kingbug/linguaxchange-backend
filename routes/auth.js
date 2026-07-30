@@ -8,6 +8,8 @@ const { sendEmail } = require('../utils/mailer')
 const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
 const { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter } = require('../middleware/rateLimit')
 const { sendOtp, checkOtp, isValidPhoneNumber } = require('../utils/phoneVerify')
+const { phoneAccountLimitReached } = require('../utils/phoneAccountLimit')
+const { requireAuth } = require('../middleware/auth')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -47,6 +49,10 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
 
   try {
+    if (await phoneAccountLimitReached(phone_number)) {
+      return res.status(400).json({ error: 'This phone number has already been used for the maximum number of accounts.' })
+    }
+
     const password_hash = await bcrypt.hash(password, 10)
 
     const { data: newUser, error } = await supabase
@@ -77,9 +83,9 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
 })
 
-// POST /api/auth/send-otp — first half of phone verification for
-// email/password signup. Google signup skips this since Google already
-// verified the account owner's identity.
+// POST /api/auth/send-otp — first half of phone verification. Shared by
+// email/password signup (/register) and Google signup (/add-phone), since
+// Google verifies identity but not phone ownership.
 router.post('/send-otp', otpSendLimiter, async (req, res) => {
   const { phone_number } = req.body
   if (!isValidPhoneNumber(phone_number)) {
@@ -116,6 +122,57 @@ router.post('/verify-otp', otpCheckLimiter, async (req, res) => {
     { expiresIn: PHONE_VERIFIED_TOKEN_TTL }
   )
   res.json({ verified_token })
+})
+
+// POST /api/auth/add-phone — completes phone verification for an
+// already-authenticated Google account (see /google-login, which defers
+// the credit grant until this succeeds). Same verified_token contract as
+// /register: proof comes from /verify-otp, never a client-supplied flag.
+router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
+  const { phone_number, verified_token } = req.body
+  if (!phone_number || !verified_token) {
+    return res.status(400).json({ error: 'Phone verification is required' })
+  }
+  try {
+    const payload = jwt.verify(verified_token, process.env.JWT_SECRET)
+    if (payload.purpose !== 'phone_verified' || payload.phone_number !== phone_number) {
+      return res.status(400).json({ error: 'Phone verification does not match' })
+    }
+  } catch (e) {
+    return res.status(400).json({ error: 'Phone verification has expired. Please verify again.' })
+  }
+
+  try {
+    if (await phoneAccountLimitReached(phone_number)) {
+      return res.status(400).json({ error: 'This phone number has already been used for the maximum number of accounts.' })
+    }
+
+    const { data: updated, error } = await supabase
+      .from('users')
+      .update({ phone_number, phone_verified: true })
+      .eq('id', req.userId)
+      .select('id, email, first_name, is_approved, phone_verified')
+      .single()
+
+    if (error) return res.status(400).json({ error: error.message })
+
+    const { data: existingCredit } = await supabase
+      .from('credits')
+      .select('user_id')
+      .eq('user_id', req.userId)
+      .maybeSingle()
+
+    if (!existingCredit) {
+      await supabase
+        .from('credits')
+        .insert([{ user_id: req.userId, balance: SIGNUP_CREDIT_GRANT }])
+    }
+
+    res.json({ user: updated })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not verify phone number' })
+  }
 })
 
 // POST /api/auth/login
@@ -181,7 +238,7 @@ router.post('/google-login', async (req, res) => {
     // Check if user already exists
     const { data: existing } = await supabase
       .from('users')
-      .select('id, email, first_name, is_approved')
+      .select('id, email, first_name, is_approved, phone_verified')
       .eq('email', email)
       .maybeSingle()
 
@@ -193,17 +250,18 @@ router.post('/google-login', async (req, res) => {
       const first_name = nameParts[0] || ''
       const last_name = nameParts.slice(1).join(' ') || ''
 
+      // No credit grant yet — Google already verifies identity, but not
+      // phone ownership, so someone could otherwise farm the signup credit
+      // grant across unlimited disposable Google accounts. The credits row
+      // is created by POST /add-phone once they verify a real number (and
+      // that number hasn't already hit phoneAccountLimitReached).
       const { data: newUser, error } = await supabase
         .from('users')
-        .insert([{ email, first_name, last_name, google_id, is_approved: false }])
-        .select('id, email, first_name, is_approved')
+        .insert([{ email, first_name, last_name, google_id, is_approved: false, phone_verified: false }])
+        .select('id, email, first_name, is_approved, phone_verified')
         .single()
 
       if (error) return res.status(400).json({ error: error.message })
-
-      await supabase
-        .from('credits')
-        .insert([{ user_id: newUser.id, balance: SIGNUP_CREDIT_GRANT }])
 
       await sendEmail({
         to: email,
