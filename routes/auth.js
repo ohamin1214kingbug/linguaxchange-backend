@@ -6,6 +6,7 @@ const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
+const { loginLimiter, registerLimiter } = require('../middleware/rateLimit')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -20,7 +21,7 @@ const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 const SIGNUP_CREDIT_GRANT = 3
 
 // POST /api/auth/register
-router.post('/register', async (req, res) => {
+router.post('/register', registerLimiter, async (req, res) => {
   const { email, password, first_name, last_name, nationality } = req.body
 
   if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email' })
@@ -59,7 +60,7 @@ router.post('/register', async (req, res) => {
 })
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body
 
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })

@@ -14,6 +14,11 @@ const cronRoutes = require('./routes/cron')
 
 const app = express()
 
+// Railway terminates TLS and proxies requests through a single hop, so trust
+// exactly one layer of X-Forwarded-For — needed for rate limiting (and
+// req.ip generally) to see the real client IP instead of Railway's own.
+app.set('trust proxy', 1)
+
 app.use(cors())
 app.use(express.json())
 
