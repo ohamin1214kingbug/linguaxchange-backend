@@ -100,11 +100,24 @@ router.post('/login', async (req, res) => {
 
 // POST /api/auth/google-login
 router.post('/google-login', async (req, res) => {
-  const { email, name, google_id } = req.body
+  const { access_token } = req.body
 
-  if (!email) return res.status(400).json({ error: 'Email required' })
+  if (!access_token) return res.status(400).json({ error: 'access_token required' })
 
   try {
+    // Never trust a client-supplied email/name/google_id directly — that
+    // would let anyone log in as any existing account just by knowing
+    // their email. Independently verify the Supabase-issued session token
+    // instead, and derive identity only from what Supabase confirms.
+    const { data: verified, error: verifyError } = await supabase.auth.getUser(access_token)
+    if (verifyError || !verified?.user?.email) {
+      return res.status(401).json({ error: 'Invalid or expired session' })
+    }
+
+    const email = verified.user.email
+    const name = verified.user.user_metadata?.full_name
+    const google_id = verified.user.id
+
     // Check if user already exists
     const { data: existing } = await supabase
       .from('users')
