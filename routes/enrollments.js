@@ -19,6 +19,16 @@ router.post('/', requireAuth, async (req, res) => {
   const { class_id } = req.body
   const user_id = req.userId
   try {
+    const { data: classRow } = await supabase
+      .from('classes')
+      .select('teacher_id')
+      .eq('id', class_id)
+      .single()
+
+    if (classRow?.teacher_id === user_id) {
+      return res.status(400).json({ error: "You can't join your own class" })
+    }
+
     const { data: credit } = await supabase
       .from('credits')
       .select('balance')
