@@ -347,15 +347,33 @@ router.post('/reset-password', async (req, res) => {
 
     const password_hash = await bcrypt.hash(password, 10)
 
+    // Invalidates any token issued before now — a leaked/stolen token
+    // stops working the moment the real owner resets their password.
     await supabase
       .from('users')
-      .update({ password_hash, reset_token: null, reset_token_expires: null })
+      .update({ password_hash, reset_token: null, reset_token_expires: null, token_valid_after: new Date().toISOString() })
       .eq('id', user.id)
 
     res.json({ message: 'Password updated successfully' })
   } catch (error) {
     console.error(error)
     res.status(500).json({ error: 'Could not reset password' })
+  }
+})
+
+// POST /api/auth/logout — bumps token_valid_after so this (and every
+// other) token issued before now stops working, not just the client's
+// local copy. See middleware/auth.js requireAuth.
+router.post('/logout', requireAuth, async (req, res) => {
+  try {
+    await supabase
+      .from('users')
+      .update({ token_valid_after: new Date().toISOString() })
+      .eq('id', req.userId)
+    res.json({ success: true })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Could not log out' })
   }
 })
 

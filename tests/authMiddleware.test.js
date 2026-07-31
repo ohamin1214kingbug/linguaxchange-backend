@@ -73,17 +73,31 @@ describe('requireAuth', () => {
     expect(next).not.toHaveBeenCalled()
   })
 
-  test('accepts a valid token and attaches userId to the request', () => {
+  test('accepts a valid token and attaches userId to the request', async () => {
+    mockUserRow = { data: { token_valid_after: null }, error: null }
     const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET, { expiresIn: '1h' })
     const req = { headers: { authorization: `Bearer ${token}` } }
     const res = mockRes()
     const next = jest.fn()
 
-    requireAuth(req, res, next)
+    await requireAuth(req, res, next)
 
     expect(next).toHaveBeenCalled()
     expect(req.userId).toBe(42)
     expect(res.status).not.toHaveBeenCalled()
+  })
+
+  test('rejects a token issued before the stored token_valid_after cutoff', async () => {
+    const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET, { expiresIn: '1h' })
+    mockUserRow = { data: { token_valid_after: new Date(Date.now() + 60 * 60 * 1000).toISOString() }, error: null }
+    const req = { headers: { authorization: `Bearer ${token}` } }
+    const res = mockRes()
+    const next = jest.fn()
+
+    await requireAuth(req, res, next)
+
+    expect(res.status).toHaveBeenCalledWith(401)
+    expect(next).not.toHaveBeenCalled()
   })
 
   test('rejects a token signed with a different secret', () => {
