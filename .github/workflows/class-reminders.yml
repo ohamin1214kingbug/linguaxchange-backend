@@ -1,0 +1,19 @@
+name: Class reminders
+
+# Pings routes/cron.js's send-class-reminders endpoint on a schedule since
+# nothing else in this project's infra (no separate Railway cron service,
+# no external pinger) was ever wired up to trigger it. See
+# utils/classReminder.js for the actual reminder logic and its 55-65
+# minute window, sized to tolerate GitHub's schedule jitter.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger reminder check
+        run: |
+          curl -sf -X POST "https://linguaxchange-backend-production.up.railway.app/api/cron/send-class-reminders?secret=${{ secrets.CRON_SECRET }}"
