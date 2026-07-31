@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { sendClassReminders } = require('../utils/classReminder')
+const { sendStartingSoonNotifications, sendLiveNotifications } = require('../utils/inAppNotifications')
 
 // GET/POST /api/cron/send-class-reminders
 // Meant to be hit every 5-10 minutes by Railway's cron scheduler or a free
@@ -14,7 +15,9 @@ async function handleSendReminders(req, res) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
   const summary = await sendClassReminders()
-  res.json(summary)
+  const startingSoonNotified = await sendStartingSoonNotifications()
+  const liveNotified = await sendLiveNotifications()
+  res.json({ ...summary, startingSoonNotified, liveNotified })
 }
 
 router.get('/send-class-reminders', handleSendReminders)

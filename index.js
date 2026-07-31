@@ -12,6 +12,7 @@ const reviewRoutes = require('./routes/reviews')
 const userRoutes = require('./routes/users')
 const videoRoutes = require('./routes/video')
 const cronRoutes = require('./routes/cron')
+const notificationRoutes = require('./routes/notifications')
 
 const app = express()
 
@@ -54,6 +55,7 @@ app.use('/api/reviews', reviewRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/video', videoRoutes)
 app.use('/api/cron', cronRoutes)
+app.use('/api/notifications', notificationRoutes)
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {

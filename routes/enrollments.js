@@ -137,6 +137,15 @@ router.post('/', requireAuth, async (req, res) => {
       text: `Hi ${teacher?.first_name}, ${student?.first_name} has joined your class.`
     })
 
+    if (cls?.teacher_id) {
+      await supabase.from('notifications').insert([{
+        user_id: cls.teacher_id,
+        type: 'student_joined',
+        class_session_id: session.id,
+        message: `${student?.first_name || 'A student'} joined '${cls?.title}'`
+      }])
+    }
+
     res.status(201).json(data)
   } catch (e) {
     console.error(e)
