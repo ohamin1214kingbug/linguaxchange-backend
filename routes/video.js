@@ -3,6 +3,7 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { buildRoomName } = require('../utils/roomName')
+const { buildJaasToken } = require('../utils/jaasToken')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -45,9 +46,30 @@ router.post('/room', requireAuth, async (req, res) => {
       .eq('id', req.userId)
       .single()
 
+    const appId = process.env.JAAS_APP_ID
+    if (!appId || !process.env.JAAS_KID || !process.env.JAAS_PRIVATE_KEY) {
+      console.error('[VIDEO] JaaS env vars missing - cannot issue a room token')
+      return res.status(500).json({ error: 'Video is not configured' })
+    }
+
+    const room = buildRoomName(class_session_id, process.env.JWT_SECRET)
+    const displayName = `${user?.first_name || 'User'} ${user?.last_name || ''}`.trim()
+
     res.json({
-      roomName: buildRoomName(class_session_id, process.env.JWT_SECRET),
-      displayName: `${user?.first_name || 'User'} ${user?.last_name || ''}`.trim(),
+      domain: '8x8.vc',
+      // JaaS namespaces every room under the tenant/AppID; the JWT's `room`
+      // claim stays the bare name.
+      roomName: `${appId}/${room}`,
+      jwt: buildJaasToken({
+        appId,
+        kid: process.env.JAAS_KID,
+        privateKey: process.env.JAAS_PRIVATE_KEY,
+        room,
+        userId: req.userId,
+        displayName,
+        isModerator: isTeacher
+      }),
+      displayName,
       topic: session.classes.title,
       isTeacher
     })
