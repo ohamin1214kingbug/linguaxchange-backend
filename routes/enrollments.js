@@ -7,6 +7,7 @@ const { pickNextUnjoinedSession } = require('../utils/pickSession')
 const { recordWeeklyActivity } = require('../utils/streak')
 const { maybeSendLowCreditNudge, resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
+const { canConfirmAttendance } = require('../utils/attendanceConfirm')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -136,6 +137,18 @@ router.post('/', requireAuth, async (req, res) => {
 router.post('/:id/confirm', requireAuth, async (req, res) => {
   const user_id = req.userId
   try {
+    const { data: existing, error: fetchError } = await supabase
+      .from('class_enrollments')
+      .select('id, class_session_id, class_sessions(session_date)')
+      .eq('id', req.params.id)
+      .eq('user_id', user_id)
+      .single()
+
+    if (fetchError || !existing) return res.status(400).json({ error: 'Enrollment not found' })
+    if (!canConfirmAttendance(existing.class_sessions.session_date)) {
+      return res.status(400).json({ error: "This class hasn't happened yet" })
+    }
+
     const { data: enrollment, error } = await supabase
       .from('class_enrollments')
       .update({ attended: true, status: 'attended' })

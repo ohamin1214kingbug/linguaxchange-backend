@@ -11,11 +11,15 @@ const supabase = createClient(
 
 router.use(requireAuth, requireAdmin)
 
+// Explicit allowlist rather than select('*') — excludes password_hash and
+// reset_token/reset_token_expires, which have no reason to leave the DB.
+const ADMIN_USER_COLUMNS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, approval_reason, current_streak, longest_streak, timezone, phone_number, phone_verified, google_id, created_at'
+
 router.get('/users', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('*')
+      .select(ADMIN_USER_COLUMNS)
       .order('created_at', { ascending: false })
     if (error) return res.status(400).json({ error: error.message })
     res.json(data)

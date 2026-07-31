@@ -3,6 +3,7 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { getEarnedBadges } = require('../utils/badges')
+const { publicGetLimiter } = require('../middleware/rateLimit')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -10,11 +11,11 @@ const supabase = createClient(
 )
 
 // GET /api/users/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone')
+      .select('id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone')
       .eq('id', req.params.id)
       .single()
 

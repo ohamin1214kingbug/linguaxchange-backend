@@ -40,4 +40,14 @@ const otpCheckLimiter = rateLimit({
   message: { error: 'Too many attempts. Please request a new code and try again.' }
 })
 
-module.exports = { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter }
+// Public, unauthenticated browse/lookup routes have no other throttle —
+// without this, bulk-scraping (e.g. iterating user IDs) is unthrottled.
+const publicGetLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' }
+})
+
+module.exports = { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, publicGetLimiter }

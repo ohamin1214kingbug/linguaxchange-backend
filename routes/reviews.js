@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
+const { isValidRating } = require('../utils/reviewValidation')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -11,13 +12,44 @@ const supabase = createClient(
 // POST /api/reviews
 router.post('/', requireAuth, async (req, res) => {
   const { class_session_id, rating, comment } = req.body
+  const sessionId = parseInt(class_session_id)
+  const ratingNum = parseInt(rating)
+
+  if (!isValidRating(ratingNum)) {
+    return res.status(400).json({ error: 'Rating must be an integer between 1 and 5' })
+  }
+
   try {
+    // Only someone who actually attended this session can review it
+    const { data: attendance } = await supabase
+      .from('class_enrollments')
+      .select('id')
+      .eq('class_session_id', sessionId)
+      .eq('user_id', req.userId)
+      .eq('attended', true)
+      .maybeSingle()
+
+    if (!attendance) {
+      return res.status(403).json({ error: 'You can only review a class you attended' })
+    }
+
+    const { data: existingReview } = await supabase
+      .from('class_reviews')
+      .select('id')
+      .eq('class_session_id', sessionId)
+      .eq('student_id', req.userId)
+      .maybeSingle()
+
+    if (existingReview) {
+      return res.status(400).json({ error: 'You already reviewed this class' })
+    }
+
     const { data, error } = await supabase
       .from('class_reviews')
       .insert([{
-        class_session_id: parseInt(class_session_id),
+        class_session_id: sessionId,
         student_id: req.userId,
-        rating: parseInt(rating),
+        rating: ratingNum,
         comment
       }])
       .select()

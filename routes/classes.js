@@ -7,6 +7,7 @@ const { buildSessionDates } = require('../utils/sessionDates')
 const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
 const { sortBySoonest } = require('../utils/classSearch')
 const { initialClassStatus, getTeacherIsApproved } = require('../utils/classApproval')
+const { publicGetLimiter } = require('../middleware/rateLimit')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -18,7 +19,7 @@ const supabase = createClient(
 // infra would be overkill at this scale. Default (and only) sort is
 // soonest-upcoming-session-first, computed in utils/classSearch.js since
 // PostgREST can't order a parent query by a child table's aggregate.
-router.get('/', async (req, res) => {
+router.get('/', publicGetLimiter, async (req, res) => {
   try {
     let query = supabase
       .from('classes')
