@@ -8,6 +8,7 @@ const { recordWeeklyActivity } = require('../utils/streak')
 const { maybeSendLowCreditNudge, resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
 const { canConfirmAttendance } = require('../utils/attendanceConfirm')
+const { canRefundCancellation } = require('../utils/enrollmentCancel')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -213,6 +214,63 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not confirm attendance' })
+  }
+})
+
+// POST /api/enrollments/:id/cancel — student cancels their own upcoming
+// booking. Refunds the credit only if done 24h+ before the session (see
+// utils/enrollmentCancel.js); deletes the row either way so the seat frees
+// up and a later re-join isn't blocked by a stale enrollment.
+router.post('/:id/cancel', requireAuth, async (req, res) => {
+  const user_id = req.userId
+  try {
+    const { data: enrollment, error: fetchError } = await supabase
+      .from('class_enrollments')
+      .select('id, status, class_sessions(session_date)')
+      .eq('id', req.params.id)
+      .eq('user_id', user_id)
+      .single()
+
+    if (fetchError || !enrollment) return res.status(404).json({ error: 'Enrollment not found' })
+    if (enrollment.status !== 'confirmed') {
+      return res.status(400).json({ error: 'This class has already happened' })
+    }
+
+    const refund = canRefundCancellation(enrollment.class_sessions.session_date)
+
+    const { error: deleteError } = await supabase
+      .from('class_enrollments')
+      .delete()
+      .eq('id', enrollment.id)
+
+    if (deleteError) return res.status(400).json({ error: deleteError.message })
+
+    if (refund) {
+      const { data: credit } = await supabase
+        .from('credits')
+        .select('balance')
+        .eq('user_id', user_id)
+        .single()
+
+      await supabase
+        .from('credits')
+        .update({ balance: (credit?.balance || 0) + 1 })
+        .eq('user_id', user_id)
+
+      await supabase
+        .from('credit_transactions')
+        .insert([{
+          user_id,
+          amount: 1,
+          type: 'refunded',
+          description: 'Cancelled class 24h+ before start'
+        }])
+    }
+
+    res.json({ success: true, refunded: refund })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not cancel enrollment' })
   }
 })
 
