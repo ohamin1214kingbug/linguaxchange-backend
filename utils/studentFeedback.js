@@ -4,6 +4,11 @@ const SKILLS = ['vocabulary', 'pronunciation', 'phrase_formation', 'fluency', 'g
 
 const MAX_COMMENT = 300
 
+// A single score says little about a lesson; three is the point where the
+// feedback starts being worth reading. Enforced here rather than only in the
+// UI, since the disabled button is a hint, not a boundary.
+const MIN_SKILLS = 3
+
 // Pure. Accepts a partial body: an unrated skill is null, not 0, so the
 // teacher can score only what they actually observed. Rejects the all-empty
 // submission, which would just be noise in the student's history.
@@ -22,8 +27,8 @@ function validateFeedback(body = {}) {
     skills[skill] = n
   }
 
-  if (SKILLS.every(s => skills[s] === null)) {
-    return { ok: false, error: 'Rate at least one skill' }
+  if (SKILLS.filter(s => skills[s] !== null).length < MIN_SKILLS) {
+    return { ok: false, error: `Rate at least ${MIN_SKILLS} skills` }
   }
 
   const comment = typeof body.comment === 'string' ? body.comment.trim() : ''
@@ -34,4 +39,4 @@ function validateFeedback(body = {}) {
   return { ok: true, skills, comment: comment || null }
 }
 
-module.exports = { SKILLS, MAX_COMMENT, validateFeedback }
+module.exports = { SKILLS, MAX_COMMENT, MIN_SKILLS, validateFeedback }
