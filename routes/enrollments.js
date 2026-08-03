@@ -288,7 +288,7 @@ router.get('/', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('class_enrollments')
-      .select('*, class_sessions(*, classes(*))')
+      .select('*, class_sessions(*, classes(*, teacher:users!teacher_id(id, first_name, last_name, photo_url)))')
       .eq('user_id', req.userId)
       .order('created_at', { ascending: false })
 
