@@ -14,6 +14,7 @@ const videoRoutes = require('./routes/video')
 const cronRoutes = require('./routes/cron')
 const notificationRoutes = require('./routes/notifications')
 const studentFeedbackRoutes = require('./routes/studentFeedback')
+const classRequestRoutes = require('./routes/classRequests')
 
 const app = express()
 
@@ -58,6 +59,7 @@ app.use('/api/video', videoRoutes)
 app.use('/api/cron', cronRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/student-feedback', studentFeedbackRoutes)
+app.use('/api/class-requests', classRequestRoutes)
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
