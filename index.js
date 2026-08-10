@@ -16,6 +16,7 @@ const notificationRoutes = require('./routes/notifications')
 const studentFeedbackRoutes = require('./routes/studentFeedback')
 const classRequestRoutes = require('./routes/classRequests')
 const reportRoutes = require('./routes/reports')
+const savedTeacherRoutes = require('./routes/savedTeachers')
 
 const app = express()
 
@@ -62,6 +63,7 @@ app.use('/api/notifications', notificationRoutes)
 app.use('/api/student-feedback', studentFeedbackRoutes)
 app.use('/api/class-requests', classRequestRoutes)
 app.use('/api/reports', reportRoutes)
+app.use('/api/saved-teachers', savedTeacherRoutes)
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
