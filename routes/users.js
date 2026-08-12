@@ -28,6 +28,49 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
   }
 })
 
+const AVATAR_MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+const MAX_AVATAR_BYTES = 5 * 1024 * 1024
+
+// POST /api/users/:id/avatar
+// Uploads through the service-role key instead of the frontend hitting
+// Supabase Storage directly, so the storage.objects policies don't need to
+// stay open to the public anon key just for logged-in users to upload.
+router.post('/:id/avatar', requireAuth, async (req, res) => {
+  if (req.userId !== parseInt(req.params.id)) {
+    return res.status(403).json({ error: 'You can only edit your own profile' })
+  }
+
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(req.body.image || '')
+  if (!match) return res.status(400).json({ error: 'Expected a jpeg, png, or webp image' })
+
+  const [, mime, base64] = match
+  const buffer = Buffer.from(base64, 'base64')
+  if (buffer.length > MAX_AVATAR_BYTES) return res.status(400).json({ error: 'Image must be under 5MB' })
+
+  const path = `avatars/${req.userId}.${AVATAR_MIME_EXT[mime]}`
+
+  try {
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(path, buffer, { contentType: mime, upsert: true })
+    if (uploadError) return res.status(400).json({ error: uploadError.message })
+
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({ photo_url: publicUrl })
+      .eq('id', req.userId)
+      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone')
+      .single()
+
+    if (error) return res.status(400).json({ error: error.message })
+    res.json(data)
+  } catch (e) {
+    res.status(500).json({ error: 'Could not upload avatar' })
+  }
+})
+
 // PATCH /api/users/:id
 router.patch('/:id', requireAuth, async (req, res) => {
   if (req.userId !== parseInt(req.params.id)) {

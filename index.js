@@ -48,7 +48,15 @@ app.use(cors({
   }
 }))
 
-app.use(express.json({ limit: '100kb' }))
+// Avatar uploads (base64-encoded images) need more headroom than every
+// other route's JSON body. A second stacked express.json() would try to
+// re-read the same (already-consumed) request stream, so pick one parser
+// per request instead of chaining two.
+const usersJsonParser = express.json({ limit: '7mb' })
+const defaultJsonParser = express.json({ limit: '100kb' })
+app.use((req, res, next) => {
+  (req.path.startsWith('/api/users') ? usersJsonParser : defaultJsonParser)(req, res, next)
+})
 
 app.use('/api/auth', authRoutes)
 app.use('/api/classes', classRoutes)
@@ -64,6 +72,16 @@ app.use('/api/student-feedback', studentFeedbackRoutes)
 app.use('/api/class-requests', classRequestRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/saved-teachers', savedTeacherRoutes)
+
+// Oversized bodies (e.g. a >5MB avatar) get rejected by body-parser before
+// any route handler runs, and Express's default error page for that is an
+// HTML stack trace — surface it as JSON like every other error response.
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Image must be under 5MB' })
+  }
+  next(err)
+})
 
 const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
