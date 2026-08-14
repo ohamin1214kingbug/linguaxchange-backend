@@ -361,6 +361,64 @@ router.post('/reset-password', async (req, res) => {
   }
 })
 
+// POST /api/auth/change-password — requires the CURRENT password, not just
+// a valid session. Tokens live in localStorage, so if one ever leaks, this
+// re-auth is the only thing between "attacker has your token" and "attacker
+// has locked you out of your own account". Rate-limited with the login
+// limiter since a wrong-password loop here is the same guessing attack.
+router.post('/change-password', requireAuth, loginLimiter, async (req, res) => {
+  const { current_password, new_password } = req.body
+
+  if (!current_password || !new_password) {
+    return res.status(400).json({ error: 'Current and new password are required' })
+  }
+  if (new_password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' })
+  }
+
+  try {
+    const { data: user } = await supabase
+      .from('users')
+      .select('password_hash')
+      .eq('id', req.userId)
+      .single()
+
+    // Google-only accounts have no password_hash — nothing to verify or replace.
+    if (!user?.password_hash) {
+      return res.status(400).json({ error: 'This account signs in with Google, so it has no password to change' })
+    }
+
+    if (!(await bcrypt.compare(current_password, user.password_hash))) {
+      return res.status(401).json({ error: 'Current password is incorrect' })
+    }
+
+    // Zeroed to the second before signing: jwt's `iat` claim is whole
+    // seconds, so a cutoff still carrying milliseconds would sit *after*
+    // the new token's iat and instantly invalidate the token we're about
+    // to hand back. See tests/passwordChangeCutoff.test.js.
+    const cutoff = new Date()
+    cutoff.setMilliseconds(0)
+
+    await supabase
+      .from('users')
+      .update({
+        password_hash: await bcrypt.hash(new_password, 10),
+        token_valid_after: cutoff.toISOString()
+      })
+      .eq('id', req.userId)
+
+    // Every previously-issued token is now dead, including this request's.
+    // Hand back a fresh one so changing your password doesn't log you out
+    // of the device you changed it on — only the other ones.
+    const token = jwt.sign({ userId: req.userId }, process.env.JWT_SECRET, { expiresIn: '7d' })
+
+    res.json({ token, message: 'Password updated. Other devices have been signed out.' })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ error: 'Could not change password' })
+  }
+})
+
 // POST /api/auth/logout — bumps token_valid_after so this (and every
 // other) token issued before now stops working, not just the client's
 // local copy. See middleware/auth.js requireAuth.

@@ -15,7 +15,7 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone')
+      .select('id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format')
       .eq('id', req.params.id)
       .single()
 
@@ -61,7 +61,7 @@ router.post('/:id/avatar', requireAuth, async (req, res) => {
       .from('users')
       .update({ photo_url: publicUrl })
       .eq('id', req.userId)
-      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone')
+      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format')
       .single()
 
     if (error) return res.status(400).json({ error: error.message })
@@ -76,18 +76,31 @@ router.patch('/:id', requireAuth, async (req, res) => {
   if (req.userId !== parseInt(req.params.id)) {
     return res.status(403).json({ error: 'You can only edit your own profile' })
   }
-  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone']
+  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format']
   const updates = {}
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key]
   }
 
   try {
+    // syncTimezone() fires on every login and PATCHes a browser-detected
+    // zone. Once someone has deliberately picked a zone, that sync must not
+    // silently overwrite it — guarded here rather than in the caller so it
+    // holds for any client, not just the one that remembers to check.
+    if (updates.timezone && updates.timezone_source !== 'manual') {
+      const { data: current } = await supabase
+        .from('users')
+        .select('timezone_source')
+        .eq('id', req.params.id)
+        .single()
+      if (current?.timezone_source === 'manual') delete updates.timezone
+    }
+
     const { data, error } = await supabase
       .from('users')
       .update(updates)
       .eq('id', req.params.id)
-      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone')
+      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format')
       .single()
 
     if (error) return res.status(400).json({ error: error.message })

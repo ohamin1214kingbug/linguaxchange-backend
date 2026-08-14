@@ -23,13 +23,16 @@ function computeReminderWindow(now = new Date()) {
 // profile — falls back to UTC (and says so explicitly, per spec, rather
 // than guessing) for a user whose timezone hasn't been detected yet, e.g.
 // they haven't logged in since this shipped.
-function formatSessionTime(sessionDateISO, timezone) {
+function formatSessionTime(sessionDateISO, timezone, timeFormat) {
   const isUtcFallback = !timezone
   const zone = timezone || 'UTC'
   const display = new Intl.DateTimeFormat('en-US', {
     timeZone: zone,
     dateStyle: 'medium',
-    timeStyle: 'short'
+    timeStyle: 'short',
+    // undefined leaves Intl's own locale default in place — the exact
+    // behaviour before this preference existed, for anyone who hasn't set one.
+    hour12: timeFormat ? timeFormat === '12h' : undefined
   }).format(new Date(sessionDateISO)) + (isUtcFallback ? ' UTC' : '')
 
   return {
@@ -89,13 +92,13 @@ async function sendClassReminders(now = new Date()) {
 
         const { data: teacher } = await supabase
           .from('users')
-          .select('email, first_name, timezone')
+          .select('email, first_name, timezone, time_format')
           .eq('id', cls.teacher_id)
           .single()
 
         const { data: enrollments } = await supabase
           .from('class_enrollments')
-          .select('users(email, first_name, timezone)')
+          .select('users(email, first_name, timezone, time_format)')
           .eq('class_session_id', session.id)
 
         const students = (enrollments || []).map(e => e.users).filter(Boolean)
@@ -104,7 +107,7 @@ async function sendClassReminders(now = new Date()) {
         // Each recipient's email renders in THEIR OWN stored timezone, not
         // one shared time for the whole session — a teacher and their
         // students can easily be in different zones.
-        const teacherTime = formatSessionTime(session.session_date, teacher?.timezone)
+        const teacherTime = formatSessionTime(session.session_date, teacher?.timezone, teacher?.time_format)
 
         // Teacher side: role-appropriate ("with [student]" only when unambiguous)
         const withWho = students.length === 0
@@ -121,7 +124,7 @@ async function sendClassReminders(now = new Date()) {
         if (teacher?.email) summary.remindersSent++
 
         for (const student of students) {
-          const studentTime = formatSessionTime(session.session_date, student.timezone)
+          const studentTime = formatSessionTime(session.session_date, student.timezone, student.time_format)
           await sendReminderEmail(student.email, student.first_name, 'Your class starts in 1 hour', [
             `Your class with ${teacher?.first_name || 'your teacher'} starts in about 1 hour, at ${studentTime.display}.`,
             studentTime.note || '',
