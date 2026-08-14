@@ -4,6 +4,12 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { getEarnedBadges } = require('../utils/badges')
 const { publicGetLimiter } = require('../middleware/rateLimit')
+const { isImplicitAutoSync } = require('../utils/timezonePolicy')
+
+// Everything the profile screen needs. PUBLIC_FIELDS omits email; the
+// owner-only responses add it.
+const PUBLIC_FIELDS = 'id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format'
+const USER_FIELDS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format'
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -15,7 +21,7 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format')
+      .select(PUBLIC_FIELDS)
       .eq('id', req.params.id)
       .single()
 
@@ -61,7 +67,7 @@ router.post('/:id/avatar', requireAuth, async (req, res) => {
       .from('users')
       .update({ photo_url: publicUrl })
       .eq('id', req.userId)
-      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format')
+      .select(USER_FIELDS)
       .single()
 
     if (error) return res.status(400).json({ error: error.message })
@@ -83,11 +89,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
   }
 
   try {
-    // syncTimezone() fires on every login and PATCHes a browser-detected
-    // zone. Once someone has deliberately picked a zone, that sync must not
-    // silently overwrite it — guarded here rather than in the caller so it
-    // holds for any client, not just the one that remembers to check.
-    if (updates.timezone && updates.timezone_source !== 'manual') {
+    // Once someone has deliberately picked a zone, the login-time
+    // auto-detect sync must not silently overwrite it. Guarded here rather
+    // than in the caller so it holds for any client, not just the one that
+    // remembers to check. See utils/timezonePolicy.js for why this keys off
+    // "no timezone_source sent" rather than "source isn't manual".
+    if (isImplicitAutoSync(updates)) {
       const { data: current } = await supabase
         .from('users')
         .select('timezone_source')
@@ -96,11 +103,23 @@ router.patch('/:id', requireAuth, async (req, res) => {
       if (current?.timezone_source === 'manual') delete updates.timezone
     }
 
+    // A suppressed auto-sync can empty this out. An empty .update() errors,
+    // so return the row unchanged instead — nothing to write is a success,
+    // not a failure.
+    if (Object.keys(updates).length === 0) {
+      const { data } = await supabase
+        .from('users')
+        .select(USER_FIELDS)
+        .eq('id', req.params.id)
+        .single()
+      return res.json(data)
+    }
+
     const { data, error } = await supabase
       .from('users')
       .update(updates)
       .eq('id', req.params.id)
-      .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format')
+      .select(USER_FIELDS)
       .single()
 
     if (error) return res.status(400).json({ error: error.message })
