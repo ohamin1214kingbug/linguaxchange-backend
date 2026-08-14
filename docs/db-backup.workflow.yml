@@ -1,0 +1,102 @@
+# Nightly Supabase backup.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# THIS FILE IS INERT WHERE IT SITS. It is kept in docs/ on purpose.
+# Do NOT move it into .github/workflows/ in this repository.
+#
+# linguaxchange-backend and linguaxchange-frontend are PUBLIC. On a public
+# repo, workflow artifacts are downloadable by anyone with the link — and
+# this artifact is a full dump of the users table: every email address,
+# bcrypt password hash, phone number and bio. Publishing that is a breach.
+#
+# Put this in .github/workflows/ of a SEPARATE PRIVATE repository instead
+# (an empty private repo is fine — it needs no code, only this file).
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Setup, once:
+#   1. Create a private repo, e.g. linguaxchange-backups
+#   2. Add this file as .github/workflows/db-backup.yml
+#   3. Settings → Secrets and variables → Actions → New repository secret
+#        Name:  SUPABASE_DB_URL
+#        Value: the Session pooler connection string from Supabase
+#               (Project → Connect → Session pooler), with the password
+#               filled in. It looks like:
+#               postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+#
+#      Use the SESSION POOLER, not the direct connection: Supabase's direct
+#      host is IPv6-only and GitHub's runners have no IPv6, so a direct URL
+#      fails to connect from here with a confusing timeout.
+#
+# Restore, when you need it:
+#   gunzip -c linguaxchange-YYYYMMDD.sql.gz | psql "$SUPABASE_DB_URL"
+
+name: Supabase backup
+
+on:
+  schedule:
+    # 02:00 Asia/Seoul (17:00 UTC the previous day).
+    - cron: '0 17 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install pg_dump 17
+        # ubuntu-latest ships pg_dump 16. Supabase runs 17.6, and pg_dump
+        # refuses to dump a server newer than itself, so the stock client
+        # fails outright with a version-mismatch error.
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
+
+      - name: Dump the public schema
+        env:
+          PGSSLMODE: require
+          # Never interpolate the secret straight into the run script — that
+          # puts it in the shell's command line. Pass it through the env.
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          # public only: Supabase manages auth/storage/realtime itself, and
+          # the pooler role usually lacks rights to dump them — including
+          # them turns a working backup into a permission error. Your own
+          # users table lives in public, which is the part that matters.
+          pg_dump "$DB_URL" \
+            --schema=public --clean --if-exists --no-owner --no-privileges \
+            | gzip -9 > "linguaxchange-$(date -u +%Y%m%d).sql.gz"
+
+      - name: Verify the dump is actually a dump
+        # A backup that silently writes an empty file is worse than none —
+        # it looks healthy until the day you need it. Fail loudly instead.
+        run: |
+          set -euo pipefail
+          f=$(ls linguaxchange-*.sql.gz)
+          gunzip -t "$f"
+
+          # Measured UNCOMPRESSED. A small, repetitive dump gzips down to a
+          # few hundred bytes, so a floor on the compressed size rejects
+          # perfectly good backups — the uncompressed size is the honest
+          # signal, and a failed dump is ~0 either way.
+          size=$(zcat < "$f" | wc -c)
+          echo "$f expands to $size bytes"
+          [ "$size" -gt 10000 ] || { echo "Too small to be a real dump"; exit 1; }
+
+          # Schema and data both present. pg_dump writes the table
+          # definition even when a table is empty, so the COPY line is what
+          # actually proves rows came across.
+          zcat < "$f" | grep -q 'CREATE TABLE public.users' \
+            || { echo "No users table in the dump"; exit 1; }
+          zcat < "$f" | grep -q 'COPY public.users' \
+            || { echo "users table has no data section"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_id }}
+          path: linguaxchange-*.sql.gz
+          # Roughly a month of history. Raise it if you want a longer
+          # window; the dump is ~1 MB gzipped at current data volume.
+          retention-days: 30
