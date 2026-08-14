@@ -17,6 +17,7 @@ const studentFeedbackRoutes = require('./routes/studentFeedback')
 const classRequestRoutes = require('./routes/classRequests')
 const reportRoutes = require('./routes/reports')
 const savedTeacherRoutes = require('./routes/savedTeachers')
+const accountRoutes = require('./routes/account')
 
 const app = express()
 
@@ -72,6 +73,7 @@ app.use('/api/student-feedback', studentFeedbackRoutes)
 app.use('/api/class-requests', classRequestRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/saved-teachers', savedTeacherRoutes)
+app.use('/api/account', accountRoutes)
 
 // Oversized bodies (e.g. a >5MB avatar) get rejected by body-parser before
 // any route handler runs, and Express's default error page for that is an

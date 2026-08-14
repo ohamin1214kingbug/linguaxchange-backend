@@ -21,14 +21,19 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select(PUBLIC_FIELDS)
+      .select(PUBLIC_FIELDS + ', deleted_at')
       .eq('id', req.params.id)
       .single()
 
-    if (error) return res.status(404).json({ error: 'User not found' })
+    // A deleted account is gone as far as the public is concerned — the row
+    // only survives to keep other members' class history intact, so serving
+    // it here would leave an anonymized ghost profile in the directory and
+    // in teacher search.
+    if (error || data?.deleted_at) return res.status(404).json({ error: 'User not found' })
 
+    const { deleted_at, ...publicProfile } = data
     const badges = await getEarnedBadges(req.params.id)
-    res.json({ ...data, badges })
+    res.json({ ...publicProfile, badges })
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch user' })
   }
