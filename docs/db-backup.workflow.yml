@@ -51,7 +51,12 @@ jobs:
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client-17
-          pg_dump --version
+          # apt installs to /usr/lib/postgresql/17/bin but leaves Ubuntu's
+          # stock pg_dump 16 first on PATH, so a bare `pg_dump` still runs
+          # the old one and dies on "server version mismatch". Put the
+          # versioned bin dir ahead of it for every later step.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       - name: Dump the public schema
         env:
