@@ -11,6 +11,26 @@ function isValidPhoneNumber(phone) {
   return typeof phone === 'string' && E164_RE.test(phone)
 }
 
+// Keyed on Twilio's numeric error codes, never the message text — Twilio
+// rewords those without notice.
+//
+// Only codes the VISITOR can actually act on get a "fix your number" style
+// message. Everything absent from this map — trial-account restrictions
+// (21608), region not enabled (21408), bad credentials (20003), missing
+// Verify service (20404) — is our configuration, not their typo, and telling
+// them to re-check a perfectly good number just sends them in circles.
+const USER_FIXABLE = {
+  21211: 'auth.otpBadNumber',        // invalid 'To' number
+  60200: 'auth.otpBadNumber',        // invalid parameter, in practice the number
+  60205: 'auth.otpBadNumber',        // landline — can't receive SMS
+  60203: 'auth.otpTooManyAttempts',  // max send attempts for this number
+  60212: 'auth.otpTooManyAttempts'   // too many concurrent requests
+}
+
+function otpErrorKey(code) {
+  return USER_FIXABLE[code] || 'auth.otpUnavailable'
+}
+
 async function sendOtp(phoneNumber) {
   if (!client || !process.env.TWILIO_VERIFY_SID) {
     return { ok: false, error: 'Phone verification is not configured' }
@@ -20,7 +40,9 @@ async function sendOtp(phoneNumber) {
       .verifications.create({ to: phoneNumber, channel: 'sms' })
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message }
+    // `code` is what makes a failure diagnosable — it's the thing you can
+    // look up, unlike the prose.
+    return { ok: false, code: e.code, error: e.message }
   }
 }
 
@@ -42,4 +64,4 @@ async function checkOtp(phoneNumber, code) {
   }
 }
 
-module.exports = { sendOtp, checkOtp, isValidPhoneNumber }
+module.exports = { sendOtp, checkOtp, isValidPhoneNumber, otpErrorKey }

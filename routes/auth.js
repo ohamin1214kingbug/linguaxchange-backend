@@ -7,7 +7,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
 const { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter } = require('../middleware/rateLimit')
-const { sendOtp, checkOtp, isValidPhoneNumber } = require('../utils/phoneVerify')
+const { sendOtp, checkOtp, isValidPhoneNumber, otpErrorKey } = require('../utils/phoneVerify')
 const { phoneAccountLimitReached } = require('../utils/phoneAccountLimit')
 const { requireAuth } = require('../middleware/auth')
 
@@ -94,8 +94,13 @@ router.post('/send-otp', otpSendLimiter, async (req, res) => {
 
   const result = await sendOtp(phone_number)
   if (!result.ok) {
-    console.error('[SEND_OTP]', result.error)
-    return res.status(400).json({ error: 'Could not send verification code. Please check the number and try again.' })
+    // Log the code alongside the prose: the code is what's greppable and
+    // lookup-able when this fails in production.
+    console.error('[SEND_OTP]', result.code || '-', result.error)
+    const key = otpErrorKey(result.code)
+    // 503 when it's our side, so "can't send right now" isn't logged as the
+    // visitor submitting something invalid.
+    return res.status(key === 'auth.otpUnavailable' ? 503 : 400).json({ error: key })
   }
   res.json({ success: true })
 })
