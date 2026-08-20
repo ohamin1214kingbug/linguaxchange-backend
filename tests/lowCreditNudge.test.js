@@ -5,7 +5,7 @@ jest.mock('@supabase/supabase-js', () => ({
   createClient: () => ({})
 }))
 
-const { LOW_CREDIT_THRESHOLD, isLowBalance, shouldConsiderNudge } = require('../utils/lowCreditNudge')
+const { LOW_CREDIT_THRESHOLD, isLowBalance, shouldConsiderNudge, nudgeEnabledFromPrefs } = require('../utils/lowCreditNudge')
 
 describe('isLowBalance', () => {
   test('threshold is 1 credit', () => {
@@ -43,5 +43,21 @@ describe('shouldConsiderNudge', () => {
   test('a brand-new user is never nudged regardless of balance', () => {
     expect(shouldConsiderNudge(0, 0)).toBe(false)
     expect(shouldConsiderNudge(1, 0)).toBe(false)
+  })
+})
+
+describe('nudgeEnabledFromPrefs', () => {
+  test('opt-out, not opt-in: missing preferences default to enabled', () => {
+    expect(nudgeEnabledFromPrefs(undefined)).toBe(true)
+    expect(nudgeEnabledFromPrefs(null)).toBe(true)
+    expect(nudgeEnabledFromPrefs({})).toBe(true)
+  })
+
+  test('an explicit false disables it', () => {
+    expect(nudgeEnabledFromPrefs({ low_credit_nudge: false })).toBe(false)
+  })
+
+  test('an explicit true keeps it enabled', () => {
+    expect(nudgeEnabledFromPrefs({ low_credit_nudge: true })).toBe(true)
   })
 })

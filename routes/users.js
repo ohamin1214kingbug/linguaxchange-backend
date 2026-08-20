@@ -5,11 +5,13 @@ const { requireAuth } = require('../middleware/auth')
 const { getEarnedBadges } = require('../utils/badges')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isImplicitAutoSync } = require('../utils/timezonePolicy')
+const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
-// owner-only responses add it.
+// owner-only responses add it. notification_preferences is owner-only too —
+// no one else needs to see your email settings.
 const PUBLIC_FIELDS = 'id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format'
-const USER_FIELDS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format'
+const USER_FIELDS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, notification_preferences'
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -87,7 +89,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
   if (req.userId !== parseInt(req.params.id)) {
     return res.status(403).json({ error: 'You can only edit your own profile' })
   }
-  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format']
+  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format', 'notification_preferences']
   const updates = {}
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key]
@@ -129,6 +131,14 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
     if (error) return res.status(400).json({ error: error.message })
     res.json(data)
+
+    // Fire-and-forget, after the response: someone re-enabling the nudge
+    // while already low shouldn't wait on their next credit spend to hear
+    // about it. Not gated on "was it previously off" — checkAndNotifyIfAlreadyLow
+    // is idempotent per low-balance episode, so a redundant call is a no-op.
+    if (updates.notification_preferences?.low_credit_nudge === true) {
+      checkAndNotifyIfAlreadyLow(req.params.id)
+    }
   } catch (e) {
     res.status(500).json({ error: 'Could not update user' })
   }
