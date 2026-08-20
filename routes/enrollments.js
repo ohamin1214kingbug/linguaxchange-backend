@@ -9,6 +9,7 @@ const { maybeSendLowCreditNudge, resetLowCreditNotificationIfToppedUp } = requir
 const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
 const { canConfirmAttendance } = require('../utils/attendanceConfirm')
 const { canRefundCancellation } = require('../utils/enrollmentCancel')
+const { isSessionFullError } = require('../utils/enrollmentCapacity')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -77,7 +78,11 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Already joined all upcoming occurrences of this class' })
     }
 
-    // Enroll student
+    // Enroll student. Capacity is enforced by a trigger on this insert
+    // (migrations/enforce_class_capacity.sql) rather than by counting seats
+    // here, since a count-then-insert in app code lets two simultaneous
+    // joins both pass. Note this runs BEFORE the credit deduction below, so
+    // a rejected seat costs the student nothing.
     const { data, error } = await supabase
       .from('class_enrollments')
       .insert([{
@@ -90,6 +95,9 @@ router.post('/', requireAuth, async (req, res) => {
       .single()
 
     if (error) {
+      if (isSessionFullError(error)) {
+        return res.status(400).json({ error: 'This class is already full.' })
+      }
       console.log('ENROLLMENT ERROR:', error)
       return res.status(400).json({ error: error.message })
     }
