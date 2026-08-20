@@ -14,6 +14,9 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
+const CLASS_MATERIALS_BUCKET = 'class-materials'
+const MAX_MATERIALS_BYTES = 10 * 1024 * 1024
+
 // GET /api/classes — all filters compose (AND together). q does a simple
 // case-insensitive substring match on title/description; full-text-search
 // infra would be overkill at this scale. Default (and only) sort is
@@ -246,6 +249,36 @@ router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
   }
 })
 
+// The three conditions that make a class editable at all: you own it (or
+// you're an admin), it isn't cancelled, and it hasn't already happened.
+// Shared by PATCH and the materials upload below so a change to the rule
+// can't apply to one and miss the other.
+async function editableClassOr(classId, userId) {
+  const { data: cls, error } = await supabase
+    .from('classes')
+    .select('id, teacher_id, status')
+    .eq('id', classId)
+    .single()
+
+  if (error || !cls) return { status: 404, error: 'Class not found' }
+  if (userId !== cls.teacher_id && !(await isAdmin(userId))) {
+    return { status: 403, error: 'Only the teacher who created this class (or an admin) can edit it' }
+  }
+  if (cls.status === 'cancelled') {
+    return { status: 400, error: 'This class has been cancelled and cannot be edited' }
+  }
+
+  const { data: sessions } = await supabase
+    .from('class_sessions')
+    .select('id, session_date, status')
+    .eq('class_id', cls.id)
+
+  if (!hasFutureSession(sessions)) {
+    return { status: 400, error: 'This class has already happened and cannot be edited' }
+  }
+  return { cls }
+}
+
 // PATCH /api/classes/:id — title/description only. Time changes aren't
 // supported here: with bookings possible and classes.status not having a
 // per-time-slot concept once a class is recurring, the safer v1 answer is
@@ -254,29 +287,9 @@ router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
 router.patch('/:id', requireAuth, async (req, res) => {
   const { title, description, materials } = req.body
   try {
-    const { data: cls, error } = await supabase
-      .from('classes')
-      .select('id, teacher_id, status')
-      .eq('id', req.params.id)
-      .single()
-
-    if (error || !cls) return res.status(404).json({ error: 'Class not found' })
-
-    if (req.userId !== cls.teacher_id && !(await isAdmin(req.userId))) {
-      return res.status(403).json({ error: 'Only the teacher who created this class (or an admin) can edit it' })
-    }
-    if (cls.status === 'cancelled') {
-      return res.status(400).json({ error: 'This class has been cancelled and cannot be edited' })
-    }
-
-    const { data: sessions } = await supabase
-      .from('class_sessions')
-      .select('id, session_date, status')
-      .eq('class_id', cls.id)
-
-    if (!hasFutureSession(sessions)) {
-      return res.status(400).json({ error: 'This class has already happened and cannot be edited' })
-    }
+    const gate = await editableClassOr(req.params.id, req.userId)
+    if (gate.error) return res.status(gate.status).json({ error: gate.error })
+    const cls = gate.cls
 
     const updates = {}
     if (title !== undefined) updates.title = title
@@ -297,6 +310,77 @@ router.patch('/:id', requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not update class' })
+  }
+})
+
+// POST /api/classes/:id/materials-pdf — replaces the class's materials PDF,
+// or removes it when sent { pdf: null }.
+//
+// Base64 in a JSON body, mirroring the avatar upload in routes/users.js, so
+// the browser never needs the anon key and storage policies can stay shut.
+// The bucket independently enforces PDF-only and a 10MB ceiling, but both
+// are re-checked here so a bad request fails with a useful message rather
+// than a storage error.
+router.post('/:id/materials-pdf', requireAuth, async (req, res) => {
+  try {
+    const gate = await editableClassOr(req.params.id, req.userId)
+    if (gate.error) return res.status(gate.status).json({ error: gate.error })
+    const cls = gate.cls
+
+    const path = `class-${cls.id}.pdf`
+
+    // Explicit null clears it. Undefined would be an accident; only an
+    // outright null counts as "remove this".
+    if (req.body.pdf === null) {
+      await supabase.storage.from(CLASS_MATERIALS_BUCKET).remove([path])
+      const { data, error } = await supabase
+        .from('classes')
+        .update({ lesson_plan_url: null })
+        .eq('id', cls.id)
+        .select()
+        .single()
+      if (error) return res.status(400).json({ error: error.message })
+      return res.json(data)
+    }
+
+    const match = /^data:application\/pdf;base64,(.+)$/.exec(req.body.pdf || '')
+    if (!match) return res.status(400).json({ error: 'Expected a PDF file' })
+
+    const buffer = Buffer.from(match[1], 'base64')
+    if (buffer.length > MAX_MATERIALS_BYTES) {
+      return res.status(400).json({ error: 'PDF must be under 10MB' })
+    }
+    // A base64 payload can claim any MIME type; check the actual bytes.
+    // Every real PDF starts with %PDF-.
+    if (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
+      return res.status(400).json({ error: 'That file is not a valid PDF' })
+    }
+
+    const { error: uploadError } = await supabase.storage
+      .from(CLASS_MATERIALS_BUCKET)
+      .upload(path, buffer, { contentType: 'application/pdf', upsert: true })
+    if (uploadError) return res.status(400).json({ error: uploadError.message })
+
+    const { data: { publicUrl } } = supabase.storage
+      .from(CLASS_MATERIALS_BUCKET)
+      .getPublicUrl(path)
+
+    // Cache-bust: the path is stable across re-uploads, so without this a
+    // replaced PDF would keep serving the old cached copy.
+    const versioned = `${publicUrl}?v=${Date.now()}`
+
+    const { data, error } = await supabase
+      .from('classes')
+      .update({ lesson_plan_url: versioned })
+      .eq('id', cls.id)
+      .select()
+      .single()
+
+    if (error) return res.status(400).json({ error: error.message })
+    res.json(data)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not upload the PDF' })
   }
 })
 

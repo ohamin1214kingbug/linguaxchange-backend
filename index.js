@@ -49,14 +49,19 @@ app.use(cors({
   }
 }))
 
-// Avatar uploads (base64-encoded images) need more headroom than every
-// other route's JSON body. A second stacked express.json() would try to
-// re-read the same (already-consumed) request stream, so pick one parser
-// per request instead of chaining two.
-const usersJsonParser = express.json({ limit: '7mb' })
+// Base64 uploads (avatar images, class materials PDFs) need more headroom
+// than every other route's JSON body. A second stacked express.json() would
+// try to re-read the same (already-consumed) request stream, so pick one
+// parser per request instead of chaining two.
+//
+// 14mb covers a 10MB PDF: base64 inflates by ~33%, so the encoded body is
+// larger than the file the teacher picked.
+const uploadJsonParser = express.json({ limit: '14mb' })
 const defaultJsonParser = express.json({ limit: '100kb' })
+const UPLOAD_PATHS = ['/api/users', '/api/classes']
 app.use((req, res, next) => {
-  (req.path.startsWith('/api/users') ? usersJsonParser : defaultJsonParser)(req, res, next)
+  const parser = UPLOAD_PATHS.some(p => req.path.startsWith(p)) ? uploadJsonParser : defaultJsonParser
+  parser(req, res, next)
 })
 
 app.use('/api/auth', authRoutes)
