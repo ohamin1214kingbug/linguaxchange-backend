@@ -8,10 +8,10 @@ const { isImplicitAutoSync } = require('../utils/timezonePolicy')
 const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
-// owner-only responses add it. notification_preferences is owner-only too —
-// no one else needs to see your email settings.
+// owner-only responses add it. notification_preferences and the teaching
+// defaults are owner-only too — no one else needs to see your settings.
 const PUBLIC_FIELDS = 'id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format'
-const USER_FIELDS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, notification_preferences'
+const USER_FIELDS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, notification_preferences, default_class_duration_minutes, default_max_students'
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -89,7 +89,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
   if (req.userId !== parseInt(req.params.id)) {
     return res.status(403).json({ error: 'You can only edit your own profile' })
   }
-  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format', 'notification_preferences']
+  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format', 'notification_preferences', 'default_class_duration_minutes', 'default_max_students']
   const updates = {}
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key]
