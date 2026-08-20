@@ -50,6 +50,73 @@ router.get('/', publicGetLimiter, async (req, res) => {
   }
 })
 
+// GET /api/classes/:id — one class, for its own detail page. Public, and
+// deliberately carries no student identities; the roster is a separate
+// authenticated route below.
+router.get('/:id', publicGetLimiter, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('classes')
+      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status)')
+      .eq('id', req.params.id)
+      .single()
+
+    if (error || !data) return res.status(404).json({ error: 'Class not found' })
+    res.json(data)
+  } catch (e) {
+    res.status(500).json({ error: 'Could not fetch class' })
+  }
+})
+
+// GET /api/classes/:id/roster — who actually joined, per session. Teacher
+// (or admin) only: this is the one place student names attach to a class,
+// so it stays off the public detail route above.
+//
+// Enrollments hang off class_sessions, not classes, so a recurring class
+// has a separate roster per occurrence — returned grouped that way rather
+// than flattened, which would double-count a student who joined twice.
+router.get('/:id/roster', requireAuth, async (req, res) => {
+  try {
+    const { data: cls, error } = await supabase
+      .from('classes')
+      .select('id, teacher_id, max_students')
+      .eq('id', req.params.id)
+      .single()
+
+    if (error || !cls) return res.status(404).json({ error: 'Class not found' })
+    if (req.userId !== cls.teacher_id && !(await isAdmin(req.userId))) {
+      return res.status(403).json({ error: 'Only the teacher who created this class (or an admin) can see who joined' })
+    }
+
+    const { data: sessions } = await supabase
+      .from('class_sessions')
+      .select('id, session_date, status')
+      .eq('class_id', cls.id)
+      .order('session_date', { ascending: true })
+
+    const sessionIds = (sessions || []).map(s => s.id)
+    const { data: enrollments } = sessionIds.length
+      ? await supabase
+          .from('class_enrollments')
+          .select('class_session_id, status, attended, student:users!user_id(id, first_name, last_name, photo_url)')
+          .in('class_session_id', sessionIds)
+      : { data: [] }
+
+    res.json({
+      max_students: cls.max_students,
+      sessions: (sessions || []).map(s => ({
+        ...s,
+        students: (enrollments || [])
+          .filter(e => e.class_session_id === s.id)
+          .map(e => ({ ...e.student, status: e.status, attended: e.attended }))
+      }))
+    })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not fetch roster' })
+  }
+})
+
 router.post('/', requireAuth, async (req, res) => {
   const {
     language_code, level, topic,
@@ -185,7 +252,7 @@ router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
 // to force cancel + repost instead of allowing a time edit that could
 // silently pull the rug out from under someone who already booked a slot.
 router.patch('/:id', requireAuth, async (req, res) => {
-  const { title, description } = req.body
+  const { title, description, materials } = req.body
   try {
     const { data: cls, error } = await supabase
       .from('classes')
@@ -214,6 +281,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const updates = {}
     if (title !== undefined) updates.title = title
     if (description !== undefined) updates.description = description
+    // Empty string means "cleared", which is a real choice — store NULL for
+    // it rather than an empty string so "no materials" is one state, not two.
+    if (materials !== undefined) updates.materials = materials || null
 
     const { data: updated, error: updateError } = await supabase
       .from('classes')
