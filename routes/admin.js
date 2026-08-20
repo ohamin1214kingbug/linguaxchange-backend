@@ -3,6 +3,7 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { recordWeeklyActivity } = require('../utils/streak')
+const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -64,6 +65,54 @@ router.post('/users/:id/reject', async (req, res) => {
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not reject user' })
+  }
+})
+
+// POST /api/admin/users/:id/credit — manual grant (support cases, goodwill,
+// etc). Mirrors the exact balance-update + audit-row shape every other
+// credit change already uses (see routes/enrollments.js) rather than a
+// separate code path, and reuses 'earned' since the type CHECK constraint
+// only allows spent/earned/refunded — there's no dedicated "granted" type,
+// and adding one is a bigger change than a description string covers.
+router.post('/users/:id/credit', async (req, res) => {
+  const amount = parseInt(req.body.amount)
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return res.status(400).json({ error: 'amount must be a positive whole number' })
+  }
+  try {
+    const { data: credit } = await supabase
+      .from('credits')
+      .select('balance')
+      .eq('user_id', req.params.id)
+      .single()
+    if (!credit) return res.status(404).json({ error: 'User not found' })
+
+    const newBalance = credit.balance + amount
+
+    const { error } = await supabase
+      .from('credits')
+      .update({ balance: newBalance })
+      .eq('user_id', req.params.id)
+    if (error) return res.status(400).json({ error: error.message })
+
+    await supabase
+      .from('credit_transactions')
+      .insert([{
+        user_id: req.params.id,
+        amount,
+        type: 'earned',
+        description: req.body.description || 'Credit added by admin'
+      }])
+
+    // Same "balance went up" case resetLowCreditNotificationIfToppedUp
+    // already covers for teaching/attendance credit — an admin grant that
+    // clears the threshold should clear the flag too.
+    await resetLowCreditNotificationIfToppedUp(req.params.id, newBalance)
+
+    res.json({ success: true, balance: newBalance })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not add credit' })
   }
 })
 
