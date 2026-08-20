@@ -249,11 +249,17 @@ router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
   }
 })
 
-// The three conditions that make a class editable at all: you own it (or
-// you're an admin), it isn't cancelled, and it hasn't already happened.
-// Shared by PATCH and the materials upload below so a change to the rule
-// can't apply to one and miss the other.
-async function editableClassOr(classId, userId) {
+// Who may change a class: its own teacher (or an admin), and only while the
+// class isn't cancelled. Shared by PATCH and the materials upload below so a
+// change to the rule can't apply to one and miss the other.
+//
+// requireFuture gates the extra "and it hasn't happened yet" rule, which
+// applies to what the class *is* — title, description — because rewriting
+// those after the fact misrepresents something students already attended.
+// Materials are deliberately exempt: handing out a recap, homework, or a
+// corrected worksheet after the session is normal teaching, not rewriting
+// history.
+async function editableClassOr(classId, userId, { requireFuture = true } = {}) {
   const { data: cls, error } = await supabase
     .from('classes')
     .select('id, teacher_id, status')
@@ -268,13 +274,15 @@ async function editableClassOr(classId, userId) {
     return { status: 400, error: 'This class has been cancelled and cannot be edited' }
   }
 
-  const { data: sessions } = await supabase
-    .from('class_sessions')
-    .select('id, session_date, status')
-    .eq('class_id', cls.id)
+  if (requireFuture) {
+    const { data: sessions } = await supabase
+      .from('class_sessions')
+      .select('id, session_date, status')
+      .eq('class_id', cls.id)
 
-  if (!hasFutureSession(sessions)) {
-    return { status: 400, error: 'This class has already happened and cannot be edited' }
+    if (!hasFutureSession(sessions)) {
+      return { status: 400, error: 'This class has already happened and cannot be edited' }
+    }
   }
   return { cls }
 }
@@ -287,7 +295,10 @@ async function editableClassOr(classId, userId) {
 router.patch('/:id', requireAuth, async (req, res) => {
   const { title, description, materials } = req.body
   try {
-    const gate = await editableClassOr(req.params.id, req.userId)
+    // Only title/description carry the "not yet happened" rule; a
+    // materials-only edit stays open after the session.
+    const rewritesTheClass = title !== undefined || description !== undefined
+    const gate = await editableClassOr(req.params.id, req.userId, { requireFuture: rewritesTheClass })
     if (gate.error) return res.status(gate.status).json({ error: gate.error })
     const cls = gate.cls
 
@@ -323,7 +334,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
 // than a storage error.
 router.post('/:id/materials-pdf', requireAuth, async (req, res) => {
   try {
-    const gate = await editableClassOr(req.params.id, req.userId)
+    const gate = await editableClassOr(req.params.id, req.userId, { requireFuture: false })
     if (gate.error) return res.status(gate.status).json({ error: gate.error })
     const cls = gate.cls
 
