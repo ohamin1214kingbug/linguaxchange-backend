@@ -30,3 +30,28 @@ describe('pickNextUnjoinedSession', () => {
     expect(pickNextUnjoinedSession(sessions, [999])).toEqual({ id: 5 })
   })
 })
+
+// A session stays status 'scheduled' after it happens, so without a date
+// check a student could spend a credit joining a class that already
+// finished — which is what the teacher profile page was offering.
+describe('pickNextUnjoinedSession — past sessions', () => {
+  const NOW = new Date('2026-08-21T12:00:00Z')
+  const past = { id: 1, session_date: '2026-07-31T09:00:00Z' }
+  const future = { id: 2, session_date: '2026-09-01T09:00:00Z' }
+
+  test('skips a session that has already started', () => {
+    expect(pickNextUnjoinedSession([past, future], [], NOW)).toEqual(future)
+  })
+
+  test('returns undefined when every remaining session is in the past', () => {
+    expect(pickNextUnjoinedSession([past], [], NOW)).toBeUndefined()
+  })
+
+  test('a future session already joined does not fall back to a past one', () => {
+    expect(pickNextUnjoinedSession([past, future], [2], NOW)).toBeUndefined()
+  })
+
+  test('sessions with no date stay joinable, for callers that only select ids', () => {
+    expect(pickNextUnjoinedSession([{ id: 9 }], [], NOW)).toEqual({ id: 9 })
+  })
+})

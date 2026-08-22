@@ -51,9 +51,12 @@ router.post('/', requireAuth, async (req, res) => {
 
     // Find the earliest scheduled session for this class the student hasn't already joined
     // (a recurring class has multiple sessions, so this lets a student book each occurrence in turn)
+    // session_date is selected, not just id: a session keeps status
+    // 'scheduled' after it happens, so pickNextUnjoinedSession needs the
+    // date to avoid handing back a class that already finished.
     const { data: sessions, error: sessionError } = await supabase
       .from('class_sessions')
-      .select('id')
+      .select('id, session_date')
       .eq('class_id', parseInt(class_id))
       .eq('status', 'scheduled')
       .order('session_date', { ascending: true })
@@ -72,10 +75,20 @@ router.post('/', requireAuth, async (req, res) => {
       .eq('user_id', user_id)
       .in('class_session_id', sessions.map(s => s.id))
 
-    const session = pickNextUnjoinedSession(sessions, (myEnrollments || []).map(e => e.class_session_id))
+    const enrolledIds = (myEnrollments || []).map(e => e.class_session_id)
+    const session = pickNextUnjoinedSession(sessions, enrolledIds)
 
     if (!session) {
-      return res.status(400).json({ error: 'Already joined all upcoming occurrences of this class' })
+      // Two different dead ends: nothing left to join because they took
+      // every occurrence, versus nothing left because the class is over.
+      // Telling someone they "already joined" a class they never attended
+      // would just be confusing.
+      const anyUpcoming = pickNextUnjoinedSession(sessions, [])
+      return res.status(400).json({
+        error: anyUpcoming
+          ? 'Already joined all upcoming occurrences of this class'
+          : 'This class has already happened'
+      })
     }
 
     // Enroll student. Capacity is enforced by a trigger on this insert
