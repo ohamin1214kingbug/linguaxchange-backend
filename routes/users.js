@@ -6,6 +6,7 @@ const { getEarnedBadges } = require('../utils/badges')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isImplicitAutoSync } = require('../utils/timezonePolicy')
 const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
+const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
 // owner-only responses add it. notification_preferences and the teaching
@@ -93,6 +94,13 @@ router.patch('/:id', requireAuth, async (req, res) => {
   const updates = {}
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key]
+  }
+
+  // Null clears the default, which is allowed; any other value has to be a
+  // size a class could actually be created with, or the database's CHECK
+  // would reject it with a raw constraint string.
+  if (updates.default_max_students != null && !isValidClassSize(updates.default_max_students)) {
+    return res.status(400).json({ error: CLASS_SIZE_ERROR })
   }
 
   try {

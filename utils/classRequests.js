@@ -9,7 +9,11 @@ const MAX_OPEN_PER_USER = 3
 
 const MAX_TOPIC = 80
 const MAX_DETAILS = 400
-const MAX_CLASS_SIZE = 20
+
+// A request a teacher can't turn into a class is worse than no request: it
+// posts fine, then collapses when someone answers it. Same bounds as the
+// classes table, from one place — see utils/classSize.js.
+const { MAX_CLASS_SIZE, isValidClassSize, CLASS_SIZE_ERROR } = require('./classSize')
 
 const LANGUAGES = ['KO', 'ES', 'DE', 'EN', 'PT', 'FR', 'IT']
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
@@ -50,8 +54,8 @@ function validateRequest(body = {}, now = new Date()) {
   }
 
   const maxStudents = Number(body.max_students)
-  if (!Number.isInteger(maxStudents) || maxStudents < 1 || maxStudents > MAX_CLASS_SIZE) {
-    return { ok: false, error: `Class size must be between 1 and ${MAX_CLASS_SIZE}` }
+  if (!isValidClassSize(maxStudents)) {
+    return { ok: false, error: CLASS_SIZE_ERROR }
   }
 
   // Required even when flexible: "sometime, whenever" gives a teacher

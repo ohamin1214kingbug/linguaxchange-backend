@@ -8,6 +8,7 @@ const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
 const { sortBySoonest } = require('../utils/classSearch')
 const { initialClassStatus, getTeacherIsApproved } = require('../utils/classApproval')
 const { publicGetLimiter } = require('../middleware/rateLimit')
+const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -136,8 +137,11 @@ router.post('/', requireAuth, async (req, res) => {
   if (new Date(scheduled_at).getTime() <= Date.now()) {
     return res.status(400).json({ error: 'This time has already passed. Please pick a future time.', field: 'scheduled_at' })
   }
-  if (!Number.isInteger(parseInt(max_students)) || parseInt(max_students) < 1) {
-    return res.status(400).json({ error: 'max_students must be a positive number' })
+  // Bounded, not just positive: without the ceiling this passed anything
+  // over 1 straight through to the database's CHECK constraint, which came
+  // back to the teacher as a raw "violates check constraint" string.
+  if (!isValidClassSize(max_students)) {
+    return res.status(400).json({ error: CLASS_SIZE_ERROR })
   }
   if (!Number.isInteger(parseInt(duration_minutes)) || parseInt(duration_minutes) < 1) {
     return res.status(400).json({ error: 'duration_minutes must be a positive number' })
