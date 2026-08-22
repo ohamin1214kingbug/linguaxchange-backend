@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { sendClassReminders } = require('../utils/classReminder')
 const { sendStartingSoonNotifications, sendLiveNotifications } = require('../utils/inAppNotifications')
+const { refundExpiredRequests } = require('../utils/requestCredits')
 
 // GET/POST /api/cron/send-class-reminders
 // Meant to be hit every 5-10 minutes by Railway's cron scheduler or a free
@@ -17,7 +18,12 @@ async function handleSendReminders(req, res) {
   const summary = await sendClassReminders()
   const startingSoonNotified = await sendStartingSoonNotifications()
   const liveNotified = await sendLiveNotifications()
-  res.json({ ...summary, startingSoonNotified, liveNotified })
+  // Posting a request costs a credit; one nobody answered has to give it
+  // back. Runs on this tick rather than its own schedule so there's no
+  // second pinger to configure — the work is a cheap indexed lookup that
+  // usually finds nothing.
+  const { refunded: requestsRefunded } = await refundExpiredRequests()
+  res.json({ ...summary, startingSoonNotified, liveNotified, requestsRefunded })
 }
 
 router.get('/send-class-reminders', handleSendReminders)
