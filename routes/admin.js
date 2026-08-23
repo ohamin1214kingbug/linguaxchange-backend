@@ -109,6 +109,12 @@ router.post('/users/:id/credit', async (req, res) => {
     // clears the threshold should clear the flag too.
     await resetLowCreditNotificationIfToppedUp(req.params.id, newBalance)
 
+    await supabase.from('notifications').insert([{
+      user_id: req.params.id,
+      type: 'credit_added',
+      message: `You received ${amount} credit${amount === 1 ? '' : 's'}`
+    }])
+
     res.json({ success: true, balance: newBalance })
   } catch (e) {
     console.error(e)
