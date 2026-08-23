@@ -16,7 +16,7 @@ router.get('/', requireAuth, async (req, res) => {
       .select('*')
       .eq('user_id', req.userId)
       .order('created_at', { ascending: false })
-      .limit(30)
+      .limit(10)
 
     if (error) return res.status(400).json({ error: error.message })
     res.json(data)
