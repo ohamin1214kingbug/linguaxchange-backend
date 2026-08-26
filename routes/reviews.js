@@ -63,6 +63,25 @@ router.post('/', requireAuth, async (req, res) => {
   }
 })
 
+// GET /api/reviews/mine — sessions this user has already reviewed.
+//
+// Without this the dashboard has no way to know a review exists, so it kept
+// offering an empty "Rate this class" form after a successful submit; the
+// second attempt then hit the "You already reviewed this class" branch above.
+router.get('/mine', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('class_reviews')
+      .select('class_session_id, rating, comment')
+      .eq('student_id', req.userId)
+
+    if (error) return res.status(400).json({ error: error.message })
+    res.json(data)
+  } catch (e) {
+    res.status(500).json({ error: 'Could not fetch your reviews' })
+  }
+})
+
 // GET /api/reviews/teacher/:teacherId
 router.get('/teacher/:teacherId', async (req, res) => {
   try {
