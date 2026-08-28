@@ -13,7 +13,10 @@ router.get('/', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('saved_teachers')
-      .select('created_at, teacher:users!teacher_id(id, first_name, last_name, photo_url, teach_language, teach_level)')
+      // nationality and bio are already public on GET /api/users/:id, so
+      // joining them here exposes nothing new — it just saves opening each
+      // teacher's page to remember which one you saved.
+      .select('created_at, teacher:users!teacher_id(id, first_name, last_name, photo_url, teach_language, teach_level, nationality, bio)')
       .eq('user_id', req.userId)
       .order('created_at', { ascending: false })
 
