@@ -18,6 +18,7 @@ const classRequestRoutes = require('./routes/classRequests')
 const reportRoutes = require('./routes/reports')
 const savedTeacherRoutes = require('./routes/savedTeachers')
 const accountRoutes = require('./routes/account')
+const resourceRoutes = require('./routes/resources')
 
 const app = express()
 
@@ -58,7 +59,7 @@ app.use(cors({
 // larger than the file the teacher picked.
 const uploadJsonParser = express.json({ limit: '14mb' })
 const defaultJsonParser = express.json({ limit: '100kb' })
-const UPLOAD_PATHS = ['/api/users', '/api/classes']
+const UPLOAD_PATHS = ['/api/users', '/api/classes', '/api/resources']
 app.use((req, res, next) => {
   const parser = UPLOAD_PATHS.some(p => req.path.startsWith(p)) ? uploadJsonParser : defaultJsonParser
   parser(req, res, next)
@@ -79,6 +80,7 @@ app.use('/api/class-requests', classRequestRoutes)
 app.use('/api/reports', reportRoutes)
 app.use('/api/saved-teachers', savedTeacherRoutes)
 app.use('/api/account', accountRoutes)
+app.use('/api/resources', resourceRoutes)
 
 // Oversized bodies (e.g. a >5MB avatar) get rejected by body-parser before
 // any route handler runs, and Express's default error page for that is an
