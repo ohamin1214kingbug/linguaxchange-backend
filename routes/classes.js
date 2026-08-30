@@ -9,6 +9,7 @@ const { sortBySoonest } = require('../utils/classSearch')
 const { initialClassStatus, getTeacherIsApproved } = require('../utils/classApproval')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
+const { decodePdf } = require('../utils/pdfUpload')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -16,7 +17,6 @@ const supabase = createClient(
 )
 
 const CLASS_MATERIALS_BUCKET = 'class-materials'
-const MAX_MATERIALS_BYTES = 10 * 1024 * 1024
 
 // GET /api/classes — all filters compose (AND together). q does a simple
 // case-insensitive substring match on title/description; full-text-search
@@ -358,18 +358,9 @@ router.post('/:id/materials-pdf', requireAuth, async (req, res) => {
       return res.json(data)
     }
 
-    const match = /^data:application\/pdf;base64,(.+)$/.exec(req.body.pdf || '')
-    if (!match) return res.status(400).json({ error: 'Expected a PDF file' })
-
-    const buffer = Buffer.from(match[1], 'base64')
-    if (buffer.length > MAX_MATERIALS_BYTES) {
-      return res.status(400).json({ error: 'PDF must be under 10MB' })
-    }
-    // A base64 payload can claim any MIME type; check the actual bytes.
-    // Every real PDF starts with %PDF-.
-    if (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') {
-      return res.status(400).json({ error: 'That file is not a valid PDF' })
-    }
+    const decoded = decodePdf(req.body.pdf)
+    if (!decoded.ok) return res.status(400).json({ error: decoded.error })
+    const buffer = decoded.buffer
 
     const { error: uploadError } = await supabase.storage
       .from(CLASS_MATERIALS_BUCKET)
