@@ -82,12 +82,16 @@ app.use('/api/saved-teachers', savedTeacherRoutes)
 app.use('/api/account', accountRoutes)
 app.use('/api/resources', resourceRoutes)
 
-// Oversized bodies (e.g. a >5MB avatar) get rejected by body-parser before
-// any route handler runs, and Express's default error page for that is an
-// HTML stack trace — surface it as JSON like every other error response.
+// Oversized bodies get rejected by body-parser before any route handler
+// runs, and Express's default error page for that is an HTML stack trace —
+// surface it as JSON like every other error response.
+//
+// The message has to cover every upload route that can land here, not just
+// avatars: class materials and resource guides are PDFs, and telling someone
+// their PDF is an oversized image is worse than saying nothing.
 app.use((err, req, res, next) => {
   if (err.type === 'entity.too.large') {
-    return res.status(413).json({ error: 'Image must be under 5MB' })
+    return res.status(413).json({ error: 'That file is too large — images must be under 5MB, PDFs under 10MB' })
   }
   next(err)
 })
