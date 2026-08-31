@@ -15,6 +15,13 @@ alter table university_domains enable row level security;
 -- verify two accounts — and is never exposed by any public route.
 -- university_domain is stored rather than derived so the badge needs no join
 -- on every profile render.
+-- The address is only claimed once ownership is proven. Writing
+-- university_email at send time instead would let anyone type a stranger's
+-- address into their own row and, via the unique index below, permanently
+-- block the real owner from ever verifying it. Pending is deliberately NOT
+-- unique: several people may have the same address pending, and exactly one
+-- of them can hold the token that confirms it.
+alter table users add column if not exists university_pending_email text;
 alter table users add column if not exists university_email text;
 alter table users add column if not exists university_domain text;
 alter table users add column if not exists university_verified_at timestamptz;

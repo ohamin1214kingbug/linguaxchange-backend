@@ -19,6 +19,7 @@ const reportRoutes = require('./routes/reports')
 const savedTeacherRoutes = require('./routes/savedTeachers')
 const accountRoutes = require('./routes/account')
 const resourceRoutes = require('./routes/resources')
+const universityRoutes = require('./routes/university')
 
 const app = express()
 
@@ -81,6 +82,7 @@ app.use('/api/reports', reportRoutes)
 app.use('/api/saved-teachers', savedTeacherRoutes)
 app.use('/api/account', accountRoutes)
 app.use('/api/resources', resourceRoutes)
+app.use('/api/university', universityRoutes)
 
 // Oversized bodies get rejected by body-parser before any route handler
 // runs, and Express's default error page for that is an HTML stack trace —

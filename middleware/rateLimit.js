@@ -50,4 +50,15 @@ const publicGetLimiter = rateLimit({
   message: { error: 'Too many requests. Please slow down.' }
 })
 
-module.exports = { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, publicGetLimiter }
+// Sending has no per-message cost on the current Resend plan, but the monthly
+// allowance is finite and an unthrottled send endpoint is a spam relay pointed
+// at arbitrary addresses. Same shape as otpSendLimiter.
+const verifyEmailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many verification emails requested. Please try again later.' }
+})
+
+module.exports = { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, publicGetLimiter, verifyEmailLimiter }
