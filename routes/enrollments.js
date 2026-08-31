@@ -115,11 +115,18 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: error.message })
     }
 
-    // Deduct 1 credit
-    await supabase
-      .from('credits')
-      .update({ balance: credit.balance - 1 })
-      .eq('user_id', user_id)
+    // Deduct 1 credit atomically. The balance read above is only an advisory
+    // pre-check for the messages up top — two simultaneous joins can both
+    // pass it, so the actual spend must be conditional in the DB. If it can't
+    // cover the credit (lost the race for the user's last one), undo the seat
+    // just taken so the student isn't enrolled for free.
+    const { data: newBalance, error: spendError } = await supabase
+      .rpc('spend_credit', { p_user_id: user_id, p_amount: 1 })
+
+    if (spendError || newBalance === null) {
+      await supabase.from('class_enrollments').delete().eq('id', data.id)
+      return res.status(400).json({ error: 'Not enough credits' })
+    }
 
     await supabase
       .from('credit_transactions')
@@ -132,7 +139,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     // Credit was just spent (not an admin/refund adjustment) — the right
     // trigger point for the low-credit nudge
-    await maybeSendLowCreditNudge(user_id, credit.balance - 1)
+    await maybeSendLowCreditNudge(user_id, newBalance)
 
     const { data: cls } = await supabase
       .from('classes')
@@ -190,15 +197,22 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
       return res.status(400).json({ error: "This class hasn't happened yet" })
     }
 
+    // Only the first confirm transitions 'confirmed' -> 'attended'. A repeat
+    // call matches no row, so the teacher credit granted below can't be minted
+    // again by replaying /confirm on the same enrollment. Without this guard,
+    // a student could re-confirm a past class N times for N teacher credits.
     const { data: enrollment, error } = await supabase
       .from('class_enrollments')
       .update({ attended: true, status: 'attended' })
       .eq('id', req.params.id)
       .eq('user_id', user_id)
+      .eq('status', 'confirmed')
       .select()
-      .single()
+      .maybeSingle()
 
     if (error) return res.status(400).json({ error: error.message })
+    // Already confirmed once — the credit below has already been paid out.
+    if (!enrollment) return res.json({ success: true, already: true })
 
     // Student attended a class this week — counts toward their weekly activity streak
     await recordWeeklyActivity(user_id)
@@ -215,30 +229,25 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
       .eq('id', session.class_id)
       .single()
 
-    const { data: teacherCredit } = await supabase
-      .from('credits')
-      .select('balance')
-      .eq('user_id', cls.teacher_id)
-      .single()
+    // Atomic grant so concurrent confirms can't lose each other's +1. NULL
+    // means the teacher has no credits row to top up — skip the transaction
+    // rather than record an 'earned' row that never moved a balance.
+    const { data: newTeacherBalance } = await supabase
+      .rpc('add_credit', { p_user_id: cls.teacher_id, p_amount: 1 })
 
-    const newTeacherBalance = (teacherCredit?.balance || 0) + 1
+    if (newTeacherBalance !== null) {
+      await supabase
+        .from('credit_transactions')
+        .insert([{
+          user_id: cls.teacher_id,
+          amount: 1,
+          type: 'earned',
+          description: 'Student confirmed attendance'
+        }])
 
-    await supabase
-      .from('credits')
-      .update({ balance: newTeacherBalance })
-      .eq('user_id', cls.teacher_id)
-
-    await supabase
-      .from('credit_transactions')
-      .insert([{
-        user_id: cls.teacher_id,
-        amount: 1,
-        type: 'earned',
-        description: 'Student confirmed attendance'
-      }])
-
-    // Teacher just topped up — clears the low-credit flag if they're back above threshold
-    await resetLowCreditNotificationIfToppedUp(cls.teacher_id, newTeacherBalance)
+      // Teacher just topped up — clears the low-credit flag if they're back above threshold
+      await resetLowCreditNotificationIfToppedUp(cls.teacher_id, newTeacherBalance)
+    }
 
     res.json({ success: true })
   } catch (e) {
@@ -268,24 +277,27 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
 
     const refund = canRefundCancellation(enrollment.class_sessions.session_date)
 
-    const { error: deleteError } = await supabase
+    // Delete only while still 'confirmed', and let only the call that
+    // actually removed the row continue to the refund below. A concurrent
+    // double-cancel would otherwise both read 'confirmed' and both refund
+    // the same booking. Same deleted-row-gates-refund trick as
+    // classRequests.js DELETE /:id. See tests/enrollmentCancel.test.js.
+    const { data: removed, error: deleteError } = await supabase
       .from('class_enrollments')
       .delete()
       .eq('id', enrollment.id)
+      .eq('user_id', user_id)
+      .eq('status', 'confirmed')
+      .select('id')
 
     if (deleteError) return res.status(400).json({ error: deleteError.message })
+    // Another request already cancelled it — don't refund twice.
+    if (!removed || removed.length === 0) {
+      return res.status(404).json({ error: 'Enrollment not found' })
+    }
 
     if (refund) {
-      const { data: credit } = await supabase
-        .from('credits')
-        .select('balance')
-        .eq('user_id', user_id)
-        .single()
-
-      await supabase
-        .from('credits')
-        .update({ balance: (credit?.balance || 0) + 1 })
-        .eq('user_id', user_id)
+      await supabase.rpc('add_credit', { p_user_id: user_id, p_amount: 1 })
 
       await supabase
         .from('credit_transactions')

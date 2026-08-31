@@ -61,16 +61,8 @@ async function cancelClass(classId, cls) {
 
     for (const enrollment of enrollments || []) {
       try {
-        const { data: credit } = await supabase
-          .from('credits')
-          .select('balance')
-          .eq('user_id', enrollment.user_id)
-          .single()
-
         await supabase
-          .from('credits')
-          .update({ balance: (credit?.balance || 0) + 1 })
-          .eq('user_id', enrollment.user_id)
+          .rpc('add_credit', { p_user_id: enrollment.user_id, p_amount: 1 })
 
         await supabase
           .from('credit_transactions')

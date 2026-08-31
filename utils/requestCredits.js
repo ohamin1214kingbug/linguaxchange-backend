@@ -28,20 +28,20 @@ async function chargeForRequest(userId) {
     return { ok: false, error: 'Not enough credits' }
   }
 
-  const balanceAfter = credit.balance - REQUEST_COST
-  if (blocksSpend(balanceAfter, await hasEverTaught(userId))) {
+  if (blocksSpend(credit.balance - REQUEST_COST, await hasEverTaught(userId))) {
     return {
       ok: false,
       error: "This would use your last credit. Teach a class first to keep earning credits — head to Classes to create one."
     }
   }
 
-  const { error } = await supabase
-    .from('credits')
-    .update({ balance: balanceAfter })
-    .eq('user_id', userId)
+  // Atomic conditional spend — the balance read above is advisory only, so
+  // the actual deduction must let the DB reject an overspend (NULL result).
+  const { data: balanceAfter, error } = await supabase
+    .rpc('spend_credit', { p_user_id: userId, p_amount: REQUEST_COST })
 
   if (error) return { ok: false, error: error.message }
+  if (balanceAfter === null) return { ok: false, error: 'Not enough credits' }
 
   await supabase.from('credit_transactions').insert([{
     user_id: userId,
@@ -58,20 +58,11 @@ async function chargeForRequest(userId) {
 // the auto-enrolment failed. `description` says which, so the student's
 // transaction history explains where the credit came from.
 async function refundForRequest(userId, description) {
-  const { data: credit } = await supabase
-    .from('credits')
-    .select('balance')
-    .eq('user_id', userId)
-    .single()
+  // Atomic add. NULL means no credits row to refund into.
+  const { data: balanceAfter } = await supabase
+    .rpc('add_credit', { p_user_id: userId, p_amount: REQUEST_COST })
 
-  if (!credit) return { ok: false }
-
-  const balanceAfter = credit.balance + REQUEST_COST
-
-  await supabase
-    .from('credits')
-    .update({ balance: balanceAfter })
-    .eq('user_id', userId)
+  if (balanceAfter === null) return { ok: false }
 
   await supabase.from('credit_transactions').insert([{
     user_id: userId,

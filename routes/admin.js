@@ -80,20 +80,12 @@ router.post('/users/:id/credit', async (req, res) => {
     return res.status(400).json({ error: 'amount must be a positive whole number' })
   }
   try {
-    const { data: credit } = await supabase
-      .from('credits')
-      .select('balance')
-      .eq('user_id', req.params.id)
-      .single()
-    if (!credit) return res.status(404).json({ error: 'User not found' })
-
-    const newBalance = credit.balance + amount
-
-    const { error } = await supabase
-      .from('credits')
-      .update({ balance: newBalance })
-      .eq('user_id', req.params.id)
+    // Atomic add so a grant can't lose a concurrent spend/grant. NULL means
+    // the user has no credits row.
+    const { data: newBalance, error } = await supabase
+      .rpc('add_credit', { p_user_id: req.params.id, p_amount: amount })
     if (error) return res.status(400).json({ error: error.message })
+    if (newBalance === null) return res.status(404).json({ error: 'User not found' })
 
     await supabase
       .from('credit_transactions')
