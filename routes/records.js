@@ -30,6 +30,30 @@ router.post('/share', requireAuth, async (req, res) => {
   }
 })
 
+// GET /api/records/share — the caller's own token, if they have one.
+//
+// Without this the settings page cannot tell an existing link from no link,
+// so it labels the button "Create" either way — and pressing it rotates the
+// URL someone already handed to a university office. Authed and scoped to the
+// caller: the token is a credential and never appears on a public route.
+//
+// Declared BEFORE GET /:token or that route would swallow the path and treat
+// "share" as somebody's token.
+router.get('/share', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('record_token')
+      .eq('id', req.userId)
+      .maybeSingle()
+    if (error) return res.status(400).json({ error: error.message })
+    res.json({ token: data?.record_token || null })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not read the link' })
+  }
+})
+
 router.delete('/share', requireAuth, async (req, res) => {
   try {
     const { error } = await supabase
