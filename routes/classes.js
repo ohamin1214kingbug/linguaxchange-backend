@@ -187,8 +187,23 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: error.message })
     }
 
+    // A recurring series is anchored to the teacher's timezone, so a 19:00
+    // class stays 19:00 for the people attending it after the clocks change.
+    // Only fetched on the recurring path — a single class has nothing to step,
+    // so it shouldn't pay for the round trip. A null timezone falls back to
+    // UTC inside buildSessionDates.
+    let teacherTimeZone = null
+    if (format === 'recurring') {
+      const { data: teacher } = await supabase
+        .from('users')
+        .select('timezone')
+        .eq('id', req.userId)
+        .single()
+      teacherTimeZone = teacher?.timezone || null
+    }
+
     const sessionDates = format === 'recurring'
-      ? buildSessionDates(scheduled_at, recurrence_type, recurrence_end_date)
+      ? buildSessionDates(scheduled_at, recurrence_type, recurrence_end_date, teacherTimeZone)
       : [new Date(scheduled_at)]
 
     const { error: sessionError } = await supabase
