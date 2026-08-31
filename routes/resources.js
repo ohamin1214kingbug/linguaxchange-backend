@@ -27,6 +27,12 @@ router.get('/', async (req, res) => {
     const { data, error } = await supabase
       .from('resources')
       .select(PUBLIC_COLUMNS)
+      // Matches the detail route below, which serves learner guides only.
+      // Without it, adding a teacher-audience row would put a URL in the
+      // sitemap and a link in the grid that both 404, because every consumer
+      // keys on (language, level) alone — and would emit the URL twice when a
+      // learner row exists for the same pair.
+      .eq('audience', 'learner')
       .not('pdf_url', 'is', null)
       .order('language_code')
       .order('level')

@@ -31,6 +31,32 @@ create table if not exists resources (
 alter table resources add column if not exists source_url text;
 alter table resources add column if not exists attribution text;
 
+-- create table if not exists skips the ENTIRE definition when the table is
+-- already there, including the audience column and the unique constraint. Both
+-- are load-bearing: every route selects audience, and POST /api/resources
+-- upserts on (language_code, level, audience), which fails outright with
+-- "no unique or exclusion constraint matching the ON CONFLICT specification"
+-- if that constraint is missing.
+--
+-- Production has both today. These guards exist so a second environment built
+-- from this file cannot end up subtly different — which is the whole reason
+-- the file is written to be re-runnable.
+alter table resources add column if not exists audience text not null default 'learner';
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint c
+    join pg_class t on t.oid = c.conrelid
+    where t.relname = 'resources' and c.contype = 'u'
+  ) then
+    alter table resources
+      add constraint resources_language_code_level_audience_key
+      unique (language_code, level, audience);
+  end if;
+end $$;
+
 -- Matches every other table in this project: the backend holds the
 -- service-role key and the frontend never queries Supabase directly, so
 -- enabling RLS with no policies closes the anon-key hole outright.
