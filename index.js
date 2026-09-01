@@ -1,21 +1,22 @@
 // Pin the process to UTC before anything constructs a Date.
 //
-// This was load-bearing until 2026-09-01: class_sessions.session_date was
-// `timestamp without time zone`, so it came back with no offset, and a
+// This was load-bearing until 2026-09-01. Every timestamp column was
+// `timestamp without time zone`, so values came back with no offset, and a
 // date-time string without one is parsed as LOCAL time per the JS spec.
 // Every `new Date(session_date)` — the attendance window, the cancellation
 // refund cutoff, every "is this class upcoming" check — was silently
 // shifted by the host's UTC offset, and production was correct only because
 // Railway runs UTC.
 //
-// session_date is now timestamptz (migrations/session_date_to_timestamptz.sql)
-// and carries its offset, so those parses are correct on any host. This
-// stays because classes.created_at, users.created_at and
-// credit_transactions.created_at are still naive: nothing does arithmetic
-// on them today, but a future caller that does would hit the same trap.
+// All 35 timestamp columns are timestamptz now (session_date_to_timestamptz
+// .sql and remaining_naive_timestamps_to_timestamptz.sql), so every value
+// carries its offset and parses correctly on any host.
 //
-// Nothing here reads server local time — no toLocale*, no getHours — so
-// pinning changes nothing else.
+// Kept anyway. It costs one line, nothing here reads server local time (no
+// toLocale*, no getHours), and it makes the process behave identically
+// wherever it runs — including for any bare date string a future column or
+// third-party payload introduces. Remove it only alongside a check that
+// nothing has reintroduced a naive timestamp.
 process.env.TZ = 'UTC'
 
 const express = require('express')
