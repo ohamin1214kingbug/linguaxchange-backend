@@ -1,2 +1,6 @@
 .env
 node_modules
+
+# Local-only. Documents attack paths and which weaknesses are still open;
+# this repository is public, and git history would keep it permanently.
+SECURITY_REVIEW.md
