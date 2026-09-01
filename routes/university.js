@@ -79,11 +79,20 @@ router.post('/verify', requireAuth, verifyEmailLimiter, async (req, res) => {
       .eq('id', req.userId)
     if (error) return res.status(400).json({ error: error.message })
 
-    await sendEmail({
+    // sendEmail returns { ok: false } rather than throwing. Ignoring it told
+    // the member to go and check an inbox nothing was sent to — the token is
+    // written either way, so the failure was completely invisible from the
+    // outside. A send that did not happen is not a success.
+    const sent = await sendEmail({
       to: email,
       subject: 'Confirm your university email — LinguaXchange',
       text: `Confirm that this address belongs to you: ${FRONTEND_URL}/university/confirm?token=${rawToken}\n\nThis link expires in 24 hours. If you didn't ask for this, you can ignore this email.`
     })
+
+    if (!sent?.ok) {
+      console.error('university verify: send failed:', sent?.error)
+      return res.status(502).json({ error: 'Could not send the confirmation email. Please try again shortly.' })
+    }
 
     res.json(genericResponse)
   } catch (e) {
