@@ -1,21 +1,21 @@
 // Pin the process to UTC before anything constructs a Date.
 //
-// class_sessions.session_date is `timestamp without time zone`, so PostgREST
-// returns it with no zone marker ("2026-09-09T17:00:00"). Per the JS spec a
-// date-time string without an offset is parsed as LOCAL time, so every
-// `new Date(session_date)` in this codebase — the attendance window, the
-// cancellation refund cutoff, "is this class still upcoming" — silently
-// shifts by the host's UTC offset. They are correct in production only
-// because Railway happens to run UTC; the same code on a machine in Madrid
-// reads every session two hours off.
+// This was load-bearing until 2026-09-01: class_sessions.session_date was
+// `timestamp without time zone`, so it came back with no offset, and a
+// date-time string without one is parsed as LOCAL time per the JS spec.
+// Every `new Date(session_date)` — the attendance window, the cancellation
+// refund cutoff, every "is this class upcoming" check — was silently
+// shifted by the host's UTC offset, and production was correct only because
+// Railway runs UTC.
 //
-// Nothing here reads server local time (no toLocale*, no getHours), and
-// every user-facing time is formatted with an explicit IANA zone, so
-// forcing UTC changes nothing except making the naive parses deterministic.
+// session_date is now timestamptz (migrations/session_date_to_timestamptz.sql)
+// and carries its offset, so those parses are correct on any host. This
+// stays because classes.created_at, users.created_at and
+// credit_transactions.created_at are still naive: nothing does arithmetic
+// on them today, but a future caller that does would hit the same trap.
 //
-// ponytail: the real fix is migrating the column to timestamptz, which also
-// lets the frontend drop its matching asUtcDate workaround. That is a
-// schema change on the busiest table and belongs in its own task.
+// Nothing here reads server local time — no toLocale*, no getHours — so
+// pinning changes nothing else.
 process.env.TZ = 'UTC'
 
 const express = require('express')
