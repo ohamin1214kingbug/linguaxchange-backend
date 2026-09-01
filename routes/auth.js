@@ -17,7 +17,7 @@ const supabase = createClient(
 )
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const FRONTEND_URL = 'https://linguaxchange-frontend.vercel.app'
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 // Long enough to finish the rest of the registration form after verifying,
 // short enough that a leaked token can't be replayed much later.

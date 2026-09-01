@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
-const FRONTEND_URL = 'https://linguaxchange-frontend.vercel.app'
+const { FRONTEND_URL } = require('./frontendUrl')
 const REMINDER_WINDOW_MIN_MS = 55 * 60 * 1000
 const REMINDER_WINDOW_MAX_MS = 65 * 60 * 1000
 

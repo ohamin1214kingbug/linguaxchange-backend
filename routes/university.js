@@ -12,7 +12,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
-const FRONTEND_URL = 'https://linguaxchange-frontend.vercel.app'
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
 
 // GET /api/university/domains — which universities can be verified. Public:

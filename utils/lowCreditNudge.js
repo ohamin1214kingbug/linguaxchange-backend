@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
-const FRONTEND_URL = 'https://linguaxchange-frontend.vercel.app'
+const { FRONTEND_URL } = require('./frontendUrl')
 const LOW_CREDIT_THRESHOLD = 1
 
 function isLowBalance(balance) {
