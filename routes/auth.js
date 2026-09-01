@@ -133,6 +133,29 @@ router.post('/verify-otp', otpCheckLimiter, async (req, res) => {
 // already-authenticated Google account (see /google-login, which defers
 // the credit grant until this succeeds). Same verified_token contract as
 // /register: proof comes from /verify-otp, never a client-supplied flag.
+// GET /api/auth/me — the caller's own account flags.
+//
+// GET /api/users/:id is public and returns PUBLIC_FIELDS to anyone, so it
+// cannot carry phone_verified: whether someone confirmed a phone number is
+// nobody else's business. This is the authed "who am I" the app was missing —
+// its absence is why the settings page was reading account state off the
+// cached login payload, which holds only id, email and first_name.
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, email, first_name, phone_verified, university_domain, university_verified_at, deleted_at')
+      .eq('id', req.userId)
+      .single()
+    if (error || !data || data.deleted_at) return res.status(404).json({ error: 'User not found' })
+    const { deleted_at, ...me } = data
+    res.json(me)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not fetch your account' })
+  }
+})
+
 router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
   const { phone_number, verified_token } = req.body
   if (!phone_number || !verified_token) {
