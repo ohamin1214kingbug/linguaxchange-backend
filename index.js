@@ -1,3 +1,23 @@
+// Pin the process to UTC before anything constructs a Date.
+//
+// class_sessions.session_date is `timestamp without time zone`, so PostgREST
+// returns it with no zone marker ("2026-09-09T17:00:00"). Per the JS spec a
+// date-time string without an offset is parsed as LOCAL time, so every
+// `new Date(session_date)` in this codebase — the attendance window, the
+// cancellation refund cutoff, "is this class still upcoming" — silently
+// shifts by the host's UTC offset. They are correct in production only
+// because Railway happens to run UTC; the same code on a machine in Madrid
+// reads every session two hours off.
+//
+// Nothing here reads server local time (no toLocale*, no getHours), and
+// every user-facing time is formatted with an explicit IANA zone, so
+// forcing UTC changes nothing except making the naive parses deterministic.
+//
+// ponytail: the real fix is migrating the column to timestamptz, which also
+// lets the frontend drop its matching asUtcDate workaround. That is a
+// schema change on the busiest table and belongs in its own task.
+process.env.TZ = 'UTC'
+
 const express = require('express')
 const cors = require('cors')
 const helmet = require('helmet')
@@ -64,7 +84,19 @@ const defaultJsonParser = express.json({ limit: '100kb' })
 const UPLOAD_PATHS = ['/api/users', '/api/classes', '/api/resources']
 app.use((req, res, next) => {
   const parser = UPLOAD_PATHS.some(p => req.path.startsWith(p)) ? uploadJsonParser : defaultJsonParser
-  parser(req, res, next)
+  parser(req, res, err => {
+    // Express 5 dropped Express 4's guarantee that req.body is always an
+    // object: with no request body at all, it stays undefined. Seventeen
+    // routes open with `const { ... } = req.body`, which then throws a
+    // TypeError before any of their own validation runs — a bodyless POST
+    // became a 500 instead of the 400 the route would have returned.
+    //
+    // Defaulting here rather than in each route means every current and
+    // future handler gets the Express 4 behaviour its validation was
+    // written against.
+    if (!err && req.body === undefined) req.body = {}
+    next(err)
+  })
 })
 
 app.use('/api/auth', authRoutes)
@@ -94,10 +126,28 @@ app.use('/api/records', recordRoutes)
 // avatars: class materials and resource guides are PDFs, and telling someone
 // their PDF is an oversized image is worse than saying nothing.
 app.use((err, req, res, next) => {
+  // Something already started writing the response — Express's own handler
+  // is the only thing that can close it cleanly.
+  if (res.headersSent) return next(err)
+
   if (err.type === 'entity.too.large') {
     return res.status(413).json({ error: 'That file is too large — images must be under 5MB, PDFs under 10MB' })
   }
-  next(err)
+
+  // Malformed or absent JSON on a request that declares application/json.
+  // body-parser throws before any route runs, so no handler can catch it.
+  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ error: 'Request body is not valid JSON' })
+  }
+
+  // Everything else. Previously this called next(err), handing the error to
+  // Express's built-in handler, which replies with an HTML page — and that
+  // page embeds the stack trace unless NODE_ENV === 'production'. Railway
+  // does not set NODE_ENV, so production was serving file paths and internal
+  // structure to anyone who sent a bad request. Log server-side, return a
+  // JSON envelope shaped like every other error in this API.
+  console.error(err)
+  res.status(err.status || err.statusCode || 500).json({ error: 'Something went wrong' })
 })
 
 const PORT = process.env.PORT || 3001

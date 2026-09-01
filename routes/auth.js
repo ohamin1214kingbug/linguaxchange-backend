@@ -61,7 +61,18 @@ router.post('/register', registerLimiter, async (req, res) => {
       .select('id, email, first_name')
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) {
+      // Signing up with an address that already exists is the one failure
+      // here a normal person hits, and it arrives as a Postgres unique
+      // violation whose raw message names the table and constraint.
+      // Returning error.message verbatim handed that schema detail to
+      // anyone who typed their own email twice.
+      if (error.code === '23505') {
+        return res.status(400).json({ error: 'That email is already registered' })
+      }
+      console.error(error)
+      return res.status(400).json({ error: 'Could not create your account' })
+    }
 
     await supabase
       .from('credits')
@@ -216,14 +227,28 @@ router.post('/login', loginLimiter, async (req, res) => {
       .eq('email', email)
       .single()
 
+    // One message for both failure modes. Distinguishing "User not found"
+    // from "Wrong password" turns this endpoint into an account-existence
+    // oracle: submit any email with a junk password and the reply says
+    // whether that person has an account here. forgot-password already
+    // guards against this by answering identically either way; login did
+    // not, which made the guard there pointless.
+    //
+    // A timing difference remains — the missing-user path skips bcrypt and
+    // so returns sooner. loginLimiter caps attempts, which makes measuring
+    // it impractical.
+    // ponytail: message-only fix, equalise with a dummy bcrypt compare if
+    // the rate limiter is ever loosened.
+    const INVALID = 'Invalid email or password'
+
     if (error || !user) {
-      return res.status(401).json({ error: 'User not found' })
+      return res.status(401).json({ error: INVALID })
     }
 
     const passwordMatch = await bcrypt.compare(password, user.password_hash)
 
     if (!passwordMatch) {
-      return res.status(401).json({ error: 'Wrong password' })
+      return res.status(401).json({ error: INVALID })
     }
 
     const token = jwt.sign(
