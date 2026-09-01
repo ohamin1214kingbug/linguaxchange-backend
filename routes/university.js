@@ -13,6 +13,7 @@ const supabase = createClient(
 )
 
 const { FRONTEND_URL } = require('../utils/frontendUrl')
+const { fail } = require('../utils/failure')
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000
 
 // GET /api/university/domains — which universities can be verified. Public:
@@ -23,7 +24,7 @@ router.get('/domains', publicGetLimiter, async (req, res) => {
       .from('university_domains')
       .select('domain, name')
       .order('name')
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch universities', error)
     res.json(data)
   } catch (e) {
     console.error(e)
@@ -77,7 +78,7 @@ router.post('/verify', requireAuth, verifyEmailLimiter, async (req, res) => {
         university_token_expires: new Date(Date.now() + TOKEN_TTL_MS).toISOString(),
       })
       .eq('id', req.userId)
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not start verification', error)
 
     // sendEmail returns { ok: false } rather than throwing. Ignoring it told
     // the member to go and check an inbox nothing was sent to — the token is
@@ -151,7 +152,7 @@ router.post('/confirm', async (req, res) => {
       if (error.code === '23505') {
         return res.status(409).json({ error: 'That address has already been verified by another account.' })
       }
-      return res.status(400).json({ error: error.message })
+      return fail(res, 400, 'Could not confirm that address', error)
     }
 
     res.json({ success: true, university: uni?.name || domain })

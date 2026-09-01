@@ -6,6 +6,7 @@ const { publicGetLimiter } = require('../middleware/rateLimit')
 const { validateRequest, expiresAt, MAX_OPEN_PER_USER } = require('../utils/classRequests')
 const { chargeForRequest, refundForRequest } = require('../utils/requestCredits')
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -95,7 +96,7 @@ router.get('/', publicGetLimiter, async (req, res) => {
     if (req.query.level) query = query.eq('level', req.query.level)
 
     const { data, error } = await query
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch class requests', error)
     res.json(data || [])
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch class requests' })
@@ -135,7 +136,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     if (error) {
       await refundForRequest(req.userId, 'Class request could not be posted')
-      return res.status(400).json({ error: error.message })
+      return fail(res, 400, 'Could not post your request', error)
     }
     res.status(201).json(data)
   } catch (e) {
@@ -157,7 +158,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
       .eq('student_id', req.userId)
       .select('id, topic, fulfilled_class_id, credit_refunded_at')
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not withdraw your request', error)
     if (!data || data.length === 0) return res.status(404).json({ error: 'Request not found' })
 
     // Only unfulfilled requests get the credit back. A fulfilled one already
@@ -202,7 +203,7 @@ router.post('/:id/interest', requireAuth, async (req, res) => {
       .from('class_request_interest')
       .insert([{ request_id: request.id, user_id: req.userId }])
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not update your interest', error)
     res.json({ interested: true })
   } catch (e) {
     console.error(e)
@@ -238,7 +239,7 @@ router.post('/:id/fulfill', requireAuth, async (req, res) => {
       .eq('id', request.id)
       .is('fulfilled_class_id', null)
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not link the class to this request', error)
 
     const { data: interested } = await supabase
       .from('class_request_interest')

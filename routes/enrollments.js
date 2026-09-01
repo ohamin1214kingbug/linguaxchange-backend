@@ -10,6 +10,7 @@ const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
 const { canConfirmAttendance } = require('../utils/attendanceConfirm')
 const { canRefundCancellation } = require('../utils/enrollmentCancel')
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -62,8 +63,7 @@ router.post('/', requireAuth, async (req, res) => {
       .order('session_date', { ascending: true })
 
     if (sessionError) {
-      console.log('SESSION ERROR:', sessionError)
-      return res.status(400).json({ error: sessionError.message })
+      return fail(res, 400, 'Could not find a session for this class', sessionError)
     }
     if (!sessions || sessions.length === 0) {
       return res.status(400).json({ error: 'No scheduled session for this class' })
@@ -111,8 +111,7 @@ router.post('/', requireAuth, async (req, res) => {
       if (isSessionFullError(error)) {
         return res.status(400).json({ error: 'This class is already full.' })
       }
-      console.log('ENROLLMENT ERROR:', error)
-      return res.status(400).json({ error: error.message })
+      return fail(res, 400, 'Could not join this class', error)
     }
 
     // Deduct 1 credit atomically. The balance read above is only an advisory
@@ -176,8 +175,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     res.status(201).json(data)
   } catch (e) {
-    console.error(e)
-    res.status(500).json({ error: e.message })
+    fail(res, 500, 'Could not join this class', e)
   }
 })
 
@@ -210,7 +208,7 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
       .select()
       .maybeSingle()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not confirm attendance', error)
     // Already confirmed once — the credit below has already been paid out.
     if (!enrollment) return res.json({ success: true, already: true })
 
@@ -290,7 +288,7 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
       .eq('status', 'confirmed')
       .select('id')
 
-    if (deleteError) return res.status(400).json({ error: deleteError.message })
+    if (deleteError) return fail(res, 400, 'Could not cancel enrollment', deleteError)
     // Another request already cancelled it — don't refund twice.
     if (!removed || removed.length === 0) {
       return res.status(404).json({ error: 'Enrollment not found' })
@@ -325,7 +323,7 @@ router.get('/', requireAuth, async (req, res) => {
       .eq('user_id', req.userId)
       .order('created_at', { ascending: false })
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch enrollments', error)
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch enrollments' })

@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -18,7 +19,7 @@ router.get('/', requireAuth, async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(10)
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch notifications', error)
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch notifications' })
@@ -34,7 +35,7 @@ router.post('/:id/read', requireAuth, async (req, res) => {
       .eq('id', req.params.id)
       .eq('user_id', req.userId)
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not mark notification read', error)
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not mark notification read' })

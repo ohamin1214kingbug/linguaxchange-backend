@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { validateResource } = require('../utils/resources')
 const { decodePdf } = require('../utils/pdfUpload')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -36,7 +37,7 @@ router.get('/', async (req, res) => {
       .not('pdf_url', 'is', null)
       .order('language_code')
       .order('level')
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch resources', error)
     res.json(data)
   } catch (e) {
     console.error(e)
@@ -54,7 +55,7 @@ router.get('/all', requireAuth, requireAdmin, async (req, res) => {
       .select(PUBLIC_COLUMNS)
       .order('language_code')
       .order('level')
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch resources', error)
     res.json(data)
   } catch (e) {
     console.error(e)
@@ -73,7 +74,7 @@ router.get('/:lang/:level', async (req, res) => {
       .eq('audience', 'learner')
       .not('pdf_url', 'is', null)
       .maybeSingle()
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch the resource', error)
     if (!data) return res.status(404).json({ error: 'Resource not found' })
     res.json(data)
   } catch (e) {
@@ -105,7 +106,7 @@ router.post('/', async (req, res) => {
       )
       .select(PUBLIC_COLUMNS)
       .single()
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not save the resource', error)
     res.json(data)
   } catch (e) {
     console.error(e)
@@ -142,7 +143,7 @@ router.post('/:id/pdf', async (req, res) => {
         .eq('id', row.id)
         .select(PUBLIC_COLUMNS)
         .single()
-      if (error) return res.status(400).json({ error: error.message })
+      if (error) return fail(res, 400, 'Could not upload the PDF', error)
       return res.json(data)
     }
 
@@ -152,7 +153,7 @@ router.post('/:id/pdf', async (req, res) => {
     const { error: uploadError } = await supabase.storage
       .from(RESOURCES_BUCKET)
       .upload(path, decoded.buffer, { contentType: 'application/pdf', upsert: true })
-    if (uploadError) return res.status(400).json({ error: uploadError.message })
+    if (uploadError) return fail(res, 400, 'Could not upload the PDF', uploadError)
 
     const { data: { publicUrl } } = supabase.storage
       .from(RESOURCES_BUCKET)
@@ -168,7 +169,7 @@ router.post('/:id/pdf', async (req, res) => {
       .eq('id', row.id)
       .select(PUBLIC_COLUMNS)
       .single()
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not upload the PDF', error)
     res.json(data)
   } catch (e) {
     console.error(e)
@@ -190,7 +191,7 @@ router.delete('/:id', async (req, res) => {
     await supabase.storage.from(RESOURCES_BUCKET).remove([path])
 
     const { error } = await supabase.from('resources').delete().eq('id', row.id)
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not delete the resource', error)
     res.json({ success: true })
   } catch (e) {
     console.error(e)

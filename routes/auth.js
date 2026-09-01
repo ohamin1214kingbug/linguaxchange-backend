@@ -18,6 +18,7 @@ const supabase = createClient(
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const { FRONTEND_URL } = require('../utils/frontendUrl')
+const { fail } = require('../utils/failure')
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 // Long enough to finish the rest of the registration form after verifying,
 // short enough that a leaked token can't be replayed much later.
@@ -193,7 +194,7 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
       .select('id, email, first_name, is_approved, phone_verified')
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not verify phone number', error)
 
     const { data: existingCredit } = await supabase
       .from('credits')
@@ -314,7 +315,7 @@ router.post('/google-login', async (req, res) => {
         .select('id, email, first_name, is_approved, phone_verified')
         .single()
 
-      if (error) return res.status(400).json({ error: error.message })
+      if (error) return fail(res, 400, 'Google login failed', error)
 
       await sendEmail({
         to: email,

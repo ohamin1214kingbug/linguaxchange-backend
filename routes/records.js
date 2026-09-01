@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { summarise } = require('../utils/participation')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -22,7 +23,7 @@ router.post('/share', requireAuth, async (req, res) => {
       .from('users')
       .update({ record_token: token })
       .eq('id', req.userId)
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not create the link', error)
     res.json({ token })
   } catch (e) {
     console.error(e)
@@ -46,7 +47,7 @@ router.get('/share', requireAuth, async (req, res) => {
       .select('record_token')
       .eq('id', req.userId)
       .maybeSingle()
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not read the link', error)
     res.json({ token: data?.record_token || null })
   } catch (e) {
     console.error(e)
@@ -60,7 +61,7 @@ router.delete('/share', requireAuth, async (req, res) => {
       .from('users')
       .update({ record_token: null })
       .eq('id', req.userId)
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not revoke the link', error)
     res.json({ success: true })
   } catch (e) {
     console.error(e)

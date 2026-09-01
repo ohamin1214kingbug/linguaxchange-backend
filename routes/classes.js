@@ -10,6 +10,7 @@ const { initialClassStatus, getTeacherIsApproved } = require('../utils/classAppr
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { decodePdf } = require('../utils/pdfUpload')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -47,7 +48,7 @@ router.get('/', publicGetLimiter, async (req, res) => {
     }
 
     const { data, error } = await query
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch classes', error)
     res.json(sortBySoonest(data || []))
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch classes' })
@@ -183,8 +184,7 @@ router.post('/', requireAuth, async (req, res) => {
       .single()
 
     if (error) {
-      console.log('SUPABASE ERROR:', error)
-      return res.status(400).json({ error: error.message })
+      return fail(res, 400, 'Could not create the class', error)
     }
 
     // A recurring series is anchored to the teacher's timezone, so a 19:00
@@ -216,14 +216,13 @@ router.post('/', requireAuth, async (req, res) => {
       })))
 
     if (sessionError) {
-      console.log('SESSION ERROR:', sessionError)
-      return res.status(400).json({ error: sessionError.message })
+      return fail(res, 400, 'Could not schedule the class sessions', sessionError)
     }
 
     res.status(201).json({ ...cls, sessionCount: sessionDates.length })
   } catch (e) {
     console.log('CATCH ERROR:', e.message)
-    res.status(500).json({ error: e.message })
+    fail(res, 500, 'Could not approve class', e)
   }
 })
 
@@ -235,7 +234,7 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res) => {
       .eq('id', req.params.id)
       .select('id, title, teacher_id')
       .single()
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not approve class', error)
 
     const { data: teacher } = await supabase
       .from('users')
@@ -261,7 +260,7 @@ router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
       .from('classes')
       .update({ status: 'rejected' })
       .eq('id', req.params.id)
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not reject class', error)
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not reject class' })
@@ -335,7 +334,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
       .select()
       .single()
 
-    if (updateError) return res.status(400).json({ error: updateError.message })
+    if (updateError) return fail(res, 400, 'Could not update class', updateError)
     res.json(updated)
   } catch (e) {
     console.error(e)
@@ -369,7 +368,7 @@ router.post('/:id/materials-pdf', requireAuth, async (req, res) => {
         .eq('id', cls.id)
         .select()
         .single()
-      if (error) return res.status(400).json({ error: error.message })
+      if (error) return fail(res, 400, 'Could not upload the PDF', error)
       return res.json(data)
     }
 
@@ -380,7 +379,7 @@ router.post('/:id/materials-pdf', requireAuth, async (req, res) => {
     const { error: uploadError } = await supabase.storage
       .from(CLASS_MATERIALS_BUCKET)
       .upload(path, buffer, { contentType: 'application/pdf', upsert: true })
-    if (uploadError) return res.status(400).json({ error: uploadError.message })
+    if (uploadError) return fail(res, 400, 'Could not upload the PDF', uploadError)
 
     const { data: { publicUrl } } = supabase.storage
       .from(CLASS_MATERIALS_BUCKET)
@@ -397,7 +396,7 @@ router.post('/:id/materials-pdf', requireAuth, async (req, res) => {
       .select()
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not upload the PDF', error)
     res.json(data)
   } catch (e) {
     console.error(e)

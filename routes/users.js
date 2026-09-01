@@ -7,6 +7,7 @@ const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isImplicitAutoSync } = require('../utils/timezonePolicy')
 const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
+const { fail } = require('../utils/failure')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
 // owner-only responses add it. notification_preferences and the teaching
@@ -67,7 +68,7 @@ router.post('/:id/avatar', requireAuth, async (req, res) => {
     const { error: uploadError } = await supabase.storage
       .from('avatars')
       .upload(path, buffer, { contentType: mime, upsert: true })
-    if (uploadError) return res.status(400).json({ error: uploadError.message })
+    if (uploadError) return fail(res, 400, 'Could not upload avatar', uploadError)
 
     const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
 
@@ -78,7 +79,7 @@ router.post('/:id/avatar', requireAuth, async (req, res) => {
       .select(USER_FIELDS)
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not upload avatar', error)
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not upload avatar' })
@@ -137,7 +138,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
       .select(USER_FIELDS)
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not update user', error)
     res.json(data)
 
     // Fire-and-forget, after the response: someone re-enabling the nudge

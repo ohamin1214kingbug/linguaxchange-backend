@@ -3,6 +3,7 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { SKILLS, validateFeedback } = require('../utils/studentFeedback')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -92,7 +93,7 @@ router.post('/', requireAuth, async (req, res) => {
       .select()
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not save feedback', error)
     res.status(201).json(data)
   } catch (e) {
     console.error(e)
@@ -109,7 +110,7 @@ router.get('/mine', requireAuth, async (req, res) => {
       .eq('student_id', req.userId)
       .order('created_at', { ascending: false })
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not load feedback', error)
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not load feedback' })

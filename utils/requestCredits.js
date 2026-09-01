@@ -40,7 +40,12 @@ async function chargeForRequest(userId) {
   const { data: balanceAfter, error } = await supabase
     .rpc('spend_credit', { p_user_id: userId, p_amount: REQUEST_COST })
 
-  if (error) return { ok: false, error: error.message }
+  // The caller returns this string straight to the client
+  // (routes/classRequests.js), so it must not be the raw Postgres message.
+  if (error) {
+    console.error('spend_credit failed', error)
+    return { ok: false, error: 'Could not use your credit' }
+  }
   if (balanceAfter === null) return { ok: false, error: 'Not enough credits' }
 
   await supabase.from('credit_transactions').insert([{

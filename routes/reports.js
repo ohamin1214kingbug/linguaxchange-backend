@@ -3,6 +3,7 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { STATUSES, validateReport } = require('../utils/reports')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -22,7 +23,7 @@ router.post('/', requireAuth, async (req, res) => {
       .select()
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not submit report', error)
     res.status(201).json(data)
   } catch (e) {
     console.error(e)
@@ -38,7 +39,7 @@ router.get('/', requireAuth, requireAdmin, async (req, res) => {
       .select('*, reporter:users!reporter_id(id, first_name, last_name, email)')
       .order('created_at', { ascending: false })
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch reports', error)
     res.json(data || [])
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch reports' })
@@ -64,7 +65,7 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
       .select()
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not update report', error)
     if (!data) return res.status(404).json({ error: 'Report not found' })
     res.json(data)
   } catch (e) {

@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { recordWeeklyActivity } = require('../utils/streak')
 const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
+const { fail } = require('../utils/failure')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -22,7 +23,7 @@ router.get('/users', async (req, res) => {
       .from('users')
       .select(ADMIN_USER_COLUMNS)
       .order('created_at', { ascending: false })
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch users', error)
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch users' })
@@ -35,7 +36,7 @@ router.get('/classes', async (req, res) => {
       .from('classes')
       .select('*')
       .order('created_at', { ascending: false })
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not fetch classes', error)
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch classes' })
@@ -48,7 +49,7 @@ router.post('/users/:id/approve', async (req, res) => {
       .from('users')
       .update({ is_approved: true })
       .eq('id', req.params.id)
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not approve user', error)
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not approve user' })
@@ -61,7 +62,7 @@ router.post('/users/:id/reject', async (req, res) => {
       .from('users')
       .update({ is_approved: false, approval_reason: 'Rejected by admin' })
       .eq('id', req.params.id)
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not reject user', error)
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not reject user' })
@@ -84,7 +85,7 @@ router.post('/users/:id/credit', async (req, res) => {
     // the user has no credits row.
     const { data: newBalance, error } = await supabase
       .rpc('add_credit', { p_user_id: req.params.id, p_amount: amount })
-    if (error) return res.status(400).json({ error: error.message })
+    if (error) return fail(res, 400, 'Could not add credit', error)
     if (newBalance === null) return res.status(404).json({ error: 'User not found' })
 
     await supabase
