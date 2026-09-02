@@ -14,6 +14,10 @@ const MAX_PROMPT = 200
 // it, short enough that a student is not left waiting a week for a refund.
 const REQUEST_TTL_HOURS = 72
 
+// How many open requests one person may have at once. Without a cap one
+// student can bury the board, exactly as in class requests.
+const MAX_OPEN_PER_USER = 3
+
 // Whitespace-separated tokens. Known wrong for Korean, where spacing is not
 // word-delimiting the way it is in Spanish, so a 300-"word" Korean passage is
 // materially longer and its reviewer is underpaid for the same banana. Left
@@ -131,6 +135,6 @@ function validateFeedback(input = {}, body = '') {
 module.exports = {
   countWords, validateAssignmentRequest, expiresAt,
   validateFeedback,
-  LANGUAGES, LEVELS, MAX_WORDS, MAX_PROMPT, REQUEST_TTL_HOURS,
+  LANGUAGES, LEVELS, MAX_WORDS, MAX_PROMPT, REQUEST_TTL_HOURS, MAX_OPEN_PER_USER,
   CATEGORIES, MAX_NOTE, MAX_OVERALL, MAX_ANNOTATIONS,
 }

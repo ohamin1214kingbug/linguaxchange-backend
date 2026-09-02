@@ -2,8 +2,9 @@ const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
+const { publicGetLimiter } = require('../middleware/rateLimit')
 const { fail } = require('../utils/failure')
-const { validateAssignmentRequest, expiresAt } = require('../utils/assignmentValidation')
+const { validateAssignmentRequest, expiresAt, MAX_OPEN_PER_USER } = require('../utils/assignmentValidation')
 const { chargeForRequest, refundForRequest } = require('../utils/requestCredits')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
@@ -23,16 +24,12 @@ const SELECT = `
 // column whitelist; the pending and confirmed email columns are not and must
 // stay out.
 
-// How many open requests one person may have at once. Without a cap one
-// student can bury the board, exactly as in class requests.
-const MAX_OPEN_PER_USER = 3
-
 // GET /api/assignments — the open board. Public, like the class-request
 // board: the point is that reviewers can see demand before signing up.
 // Expiry is evaluated here rather than by a cleanup job, matching
 // routes/classRequests.js — nothing reads stale rows, so deleting them buys
 // nothing.
-router.get('/', async (req, res) => {
+router.get('/', publicGetLimiter, async (req, res) => {
   try {
     let query = supabase
       .from('assignment_requests')
@@ -58,7 +55,7 @@ router.get('/', async (req, res) => {
 // Separate from the board because the board filters on expires_at: an
 // answered request passes its expiry and disappears from the list, but its own
 // page must keep working for the student who is about to acknowledge it.
-router.get('/:id', async (req, res) => {
+router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('assignment_requests')
