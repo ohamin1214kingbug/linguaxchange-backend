@@ -156,7 +156,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 })
 
 const { validateFeedback } = require('../utils/assignmentValidation')
-const { isOverCap, countFeedbackEarnings } = require('../utils/assignmentCredits')
+const { isOverCap, countFeedbackEarnings, releaseFeedbackCredit } = require('../utils/assignmentCredits')
 
 // POST /api/assignments/:id/feedback — answer a request.
 //
@@ -230,6 +230,47 @@ router.post('/:id/feedback', requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not save your feedback' })
+  }
+})
+
+// POST /api/assignments/:id/acknowledge — the student releases the banana.
+//
+// Same shape as attendance confirmation: the recipient releases the credit
+// rather than the provider claiming the work is done. Idempotent by
+// conditional transition, so a double click pays once.
+router.post('/:id/acknowledge', requireAuth, async (req, res) => {
+  try {
+    const { data: request } = await supabase
+      .from('assignment_requests')
+      .select('id, student_id')
+      .eq('id', req.params.id)
+      .eq('student_id', req.userId)
+      .maybeSingle()
+
+    if (!request) return res.status(404).json({ error: 'Request not found' })
+
+    const now = new Date().toISOString()
+    const { data: released, error } = await supabase
+      .from('assignment_feedback')
+      .update({ acknowledged_at: now, credit_released_at: now })
+      .eq('request_id', request.id)
+      .is('credit_released_at', null)
+      .select('id, reviewer_id')
+
+    if (error) return fail(res, 400, 'Could not acknowledge the feedback', error)
+
+    // No row transitioned: already released, by an earlier click or by the
+    // cron's automatic release. Report success — the outcome the caller wanted
+    // is already true.
+    if (!released || released.length === 0) {
+      return res.json({ success: true, already: true })
+    }
+
+    await releaseFeedbackCredit(released[0].reviewer_id)
+    res.json({ success: true })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not acknowledge the feedback' })
   }
 })
 

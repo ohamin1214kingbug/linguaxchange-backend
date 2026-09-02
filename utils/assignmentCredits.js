@@ -101,7 +101,80 @@ async function releaseFeedbackCredit(reviewerId) {
   return { ok: true, balance: balanceAfter }
 }
 
+// A student who never comes back must not leave a reviewer unpaid. At five
+// users one unresponsive student is enough to make reviewing feel pointless,
+// so the banana releases on its own after this long.
+const AUTO_RELEASE_HOURS = 72
+
+// Claimed with a conditional update first, so two overlapping cron ticks
+// cannot pay the same reviewer twice — the pattern refundExpiredRequests
+// already uses.
+async function releaseDueFeedback(now = new Date()) {
+  const cutoff = new Date(now.getTime() - AUTO_RELEASE_HOURS * 60 * 60 * 1000)
+  let released = 0
+  try {
+    const { data: due } = await db()
+      .from('assignment_feedback')
+      .select('id, reviewer_id')
+      .is('credit_released_at', null)
+      .lt('created_at', cutoff.toISOString())
+
+    for (const row of due || []) {
+      const { data: claimed } = await db()
+        .from('assignment_feedback')
+        .update({ credit_released_at: now.toISOString() })
+        .eq('id', row.id)
+        .is('credit_released_at', null)
+        .select('id')
+
+      if (claimed && claimed.length > 0) {
+        await releaseFeedbackCredit(row.reviewer_id)
+        released++
+      }
+    }
+  } catch (e) {
+    console.error('releaseDueFeedback failed', e)
+  }
+  return { released }
+}
+
+// An unanswered request expires and the banana goes back. This is the answer
+// to the supply problem: a German request nobody can answer costs the student
+// nothing but time.
+async function refundExpiredAssignments(now = new Date()) {
+  const { refundForRequest } = require('./requestCredits')
+  let refunded = 0
+  try {
+    const { data: stale } = await db()
+      .from('assignment_requests')
+      .select('id, student_id, assignment_feedback(id)')
+      .lt('expires_at', now.toISOString())
+      .is('credit_refunded_at', null)
+
+    for (const row of stale || []) {
+      // Answered requests are not refunded; their banana goes to the reviewer.
+      if ((row.assignment_feedback || []).length > 0) continue
+
+      const { data: claimed } = await db()
+        .from('assignment_requests')
+        .update({ credit_refunded_at: now.toISOString() })
+        .eq('id', row.id)
+        .is('credit_refunded_at', null)
+        .select('id')
+
+      if (claimed && claimed.length > 0) {
+        await refundForRequest(row.student_id, 'Assignment request expired unanswered')
+        refunded++
+      }
+    }
+  } catch (e) {
+    console.error('refundExpiredAssignments failed', e)
+  }
+  return { refunded }
+}
+
 module.exports = {
   isOverCap, countFeedbackEarnings, releaseFeedbackCredit, windowStart,
   WEEKLY_FEEDBACK_CAP, FEEDBACK_TYPE, WINDOW_DAYS,
+  releaseDueFeedback, refundExpiredAssignments, AUTO_RELEASE_HOURS,
 }
