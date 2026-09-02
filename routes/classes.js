@@ -5,7 +5,7 @@ const { requireAuth, requireAdmin, isAdmin } = require('../middleware/auth')
 const { sendEmail } = require('../utils/mailer')
 const { buildSessionDates } = require('../utils/sessionDates')
 const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
-const { sortBySoonest } = require('../utils/classSearch')
+const { sortBySoonest, hasUpcomingSession } = require('../utils/classSearch')
 const { initialClassStatus, getTeacherIsApproved } = require('../utils/classApproval')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
@@ -49,7 +49,12 @@ router.get('/', publicGetLimiter, async (req, res) => {
 
     const { data, error } = await query
     if (error) return fail(res, 400, 'Could not fetch classes', error)
-    res.json(sortBySoonest(data || []))
+    const sorted = sortBySoonest(data || [])
+
+    // Browsing drops classes nobody can join any more; a teacher-scoped query
+    // keeps them, because the dashboard, teacher profiles, the history page
+    // and StreakCalendar all rely on finished classes coming back.
+    res.json(req.query.teacher_id ? sorted : sorted.filter(cls => hasUpcomingSession(cls)))
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch classes' })
   }

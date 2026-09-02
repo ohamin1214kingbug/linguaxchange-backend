@@ -66,3 +66,46 @@ describe('sortBySoonest', () => {
     expect(classes).toEqual(original)
   })
 })
+
+// Added 2026-09-02. The public browse page was showing ten finished classes
+// out of fourteen, several of them test rows titled "Test" and "test" — the
+// first thing a visitor saw. Sorting them last was not enough, because with
+// few classes "last" is still on screen.
+describe('hasUpcomingSession', () => {
+  const { hasUpcomingSession } = require('../utils/classSearch')
+  const now = new Date('2026-09-02T12:00:00Z')
+
+  const cls = sessions => ({ class_sessions: sessions })
+
+  it('keeps a class with a future scheduled session', () => {
+    expect(hasUpcomingSession(cls([
+      { status: 'scheduled', session_date: '2026-09-09T17:00:00+00:00' }
+    ]), now)).toBe(true)
+  })
+
+  it('drops a class whose only session has passed', () => {
+    expect(hasUpcomingSession(cls([
+      { status: 'scheduled', session_date: '2026-07-16T06:24:48+00:00' }
+    ]), now)).toBe(false)
+  })
+
+  it('drops a class whose future session is cancelled', () => {
+    // A cancelled session is not joinable, so it must not keep the class on
+    // the browse page.
+    expect(hasUpcomingSession(cls([
+      { status: 'cancelled', session_date: '2026-09-09T17:00:00+00:00' }
+    ]), now)).toBe(false)
+  })
+
+  it('keeps a class with one past and one future session', () => {
+    expect(hasUpcomingSession(cls([
+      { status: 'scheduled', session_date: '2026-07-16T06:24:48+00:00' },
+      { status: 'scheduled', session_date: '2026-09-09T17:00:00+00:00' }
+    ]), now)).toBe(true)
+  })
+
+  it('drops a class with no sessions at all', () => {
+    expect(hasUpcomingSession(cls([]), now)).toBe(false)
+    expect(hasUpcomingSession({}, now)).toBe(false)
+  })
+})
