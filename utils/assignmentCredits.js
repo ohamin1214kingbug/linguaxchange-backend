@@ -49,6 +49,25 @@ async function countFeedbackEarnings(userId, since = windowStart()) {
 
 // Atomic add through the same RPC every other credit path uses. Never
 // read-modify-write.
+//
+// The add_credit payout and the credit_transactions row are two separate
+// writes with no shared transaction, so they can diverge. If the insert
+// fails silently after a successful payout, countFeedbackEarnings — which
+// counts exactly these rows — never sees it: an uncapped currency, paid out
+// for free forever. (This is FINDING 1 from the task-4 review: the column
+// that made every 'earned_feedback' insert fail has since been widened, see
+// migrations/add_assignment_feedback.sql, but the code must not trust the
+// insert regardless.)
+//
+// So the insert's error is checked, and on failure the payout is reversed
+// via spend_credit — the only other atomic credit RPC available — rather
+// than left standing with no audit row. spend_credit only decrements when
+// the balance can cover it, so if the caller has already spent the credit
+// elsewhere in the interim the reversal itself fails; that case is logged
+// as its own error (balance and audit log are now genuinely out of sync)
+// since there's no further atomic recovery available. Either way the caller
+// gets { ok: false } — a payout that couldn't be recorded is never reported
+// as a success.
 async function releaseFeedbackCredit(reviewerId) {
   const { data: balanceAfter, error } = await db()
     .rpc('add_credit', { p_user_id: reviewerId, p_amount: 1 })
@@ -57,12 +76,27 @@ async function releaseFeedbackCredit(reviewerId) {
     return { ok: false }
   }
 
-  await db().from('credit_transactions').insert([{
+  const { error: insertError } = await db().from('credit_transactions').insert([{
     user_id: reviewerId,
     amount: 1,
     type: FEEDBACK_TYPE,
     description: 'Assignment feedback',
   }])
+
+  if (insertError) {
+    console.error('feedback credit transaction insert failed, reversing payout', insertError)
+
+    const { data: balanceAfterReversal, error: reversalError } = await db()
+      .rpc('spend_credit', { p_user_id: reviewerId, p_amount: 1 })
+    if (reversalError || balanceAfterReversal === null) {
+      console.error(
+        'feedback credit reversal failed — balance and audit log are now out of sync for user',
+        reviewerId, reversalError
+      )
+    }
+
+    return { ok: false }
+  }
 
   return { ok: true, balance: balanceAfter }
 }
