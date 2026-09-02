@@ -160,4 +160,15 @@ describe('validateFeedback', () => {
     const r = validateFeedback({ annotations: [ann({ evil: 'x' })] }, body)
     expect(Object.keys(r.annotations[0]).sort()).toEqual(['category', 'end', 'note', 'start'])
   })
+
+  test('rejects a non-string body (object)', () => {
+    const r = validateFeedback({ annotations: [ann()] }, { body: 'text' })
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/text to annotate/i)
+  })
+
+  test('rejects a null body', () => {
+    const r = validateFeedback({ annotations: [ann()] }, null)
+    expect(r.ok).toBe(false)
+  })
 })

@@ -78,6 +78,10 @@ const MAX_OVERALL = 500
 const MAX_ANNOTATIONS = 40
 
 function validateFeedback(input = {}, body = '') {
+  if (typeof body !== 'string') {
+    return { ok: false, error: 'Provide the text to annotate' }
+  }
+
   const raw = Array.isArray(input.annotations) ? input.annotations : []
   if (raw.length === 0) {
     return { ok: false, error: 'Mark at least one part of the text' }
