@@ -158,4 +158,82 @@ router.delete('/:id', requireAuth, async (req, res) => {
   }
 })
 
+const { validateFeedback } = require('../utils/assignmentValidation')
+const { isOverCap, countFeedbackEarnings } = require('../utils/assignmentCredits')
+
+// POST /api/assignments/:id/feedback — answer a request.
+//
+// First response wins, and that is enforced by the unique constraint on
+// request_id rather than by checking first and racing.
+router.post('/:id/feedback', requireAuth, async (req, res) => {
+  try {
+    const { data: request } = await supabase
+      .from('assignment_requests')
+      .select('id, student_id, language_code, body, expires_at')
+      .eq('id', req.params.id)
+      .maybeSingle()
+
+    if (!request) return res.status(404).json({ error: 'Request not found' })
+    if (new Date(request.expires_at) <= new Date()) {
+      return res.status(400).json({ error: 'This request has expired' })
+    }
+    if (request.student_id === req.userId) {
+      return res.status(400).json({ error: "You can't answer your own request" })
+    }
+
+    // The only permission gate: the reviewer speaks the language natively.
+    // A university restriction was considered and rejected — with one verified
+    // user it would starve the feature before it had any.
+    const { data: reviewer } = await supabase
+      .from('users')
+      .select('teach_language')
+      .eq('id', req.userId)
+      .maybeSingle()
+
+    if (!reviewer || reviewer.teach_language !== request.language_code) {
+      return res.status(403).json({ error: 'You can only give feedback in your own native language' })
+    }
+
+    const earned = await countFeedbackEarnings(req.userId)
+    if (isOverCap(earned)) {
+      return res.status(400).json({ error: "You've reached this week's feedback limit. Teach a class to keep earning." })
+    }
+
+    const check = validateFeedback(req.body, request.body)
+    if (!check.ok) return res.status(400).json({ error: check.error })
+
+    const { data, error } = await supabase
+      .from('assignment_feedback')
+      .insert([{
+        request_id: request.id,
+        reviewer_id: req.userId,
+        annotations: check.annotations,
+        overall: check.overall,
+      }])
+      .select('id, created_at')
+      .single()
+
+    if (error) {
+      // 23505 is the unique violation on request_id: somebody answered first.
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'Someone answered this first' })
+      }
+      return fail(res, 400, 'Could not save your feedback', error)
+    }
+
+    // Best effort. A failed notification must not fail the feedback that was
+    // already written.
+    await supabase.from('notifications').insert([{
+      user_id: request.student_id,
+      type: 'assignment_answered',
+      message: 'Your writing has feedback',
+    }])
+
+    res.status(201).json(data)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not save your feedback' })
+  }
+})
+
 module.exports = router
