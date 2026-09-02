@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js')
+const { checkHeartbeat } = require('./cronHeartbeat')
 
 // Built on first use rather than at import. Importing a module should not
 // construct a client, and doing so made this file impossible to require in a
@@ -148,13 +149,17 @@ async function checkDatabase() {
 // Runs every check and reports all of them, rather than stopping at the first
 // failure — when two things break together, the alert should say so.
 async function runHealthChecks() {
-  const [email, google, database] = await Promise.all([
+  const [email, google, database, reminders] = await Promise.all([
     withTimeout(checkEmail(), 'email'),
     withTimeout(checkGoogleOAuth(), 'google'),
-    withTimeout(checkDatabase(), 'database')
+    withTimeout(checkDatabase(), 'database'),
+    // The scheduler itself. Added after the reminder job was found dead for
+    // five weeks: the three checks above were all green throughout, because
+    // none of them could see whether anything was actually calling this API.
+    withTimeout(checkHeartbeat(), 'reminders')
   ])
 
-  const checks = { email, google, database }
+  const checks = { email, google, database, reminders }
   const failing = Object.entries(checks).filter(([, c]) => !c.ok).map(([name]) => name)
 
   return {

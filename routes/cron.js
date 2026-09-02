@@ -4,6 +4,7 @@ const { sendClassReminders } = require('../utils/classReminder')
 const { sendStartingSoonNotifications, sendLiveNotifications } = require('../utils/inAppNotifications')
 const { refundExpiredRequests } = require('../utils/requestCredits')
 const { runHealthChecks } = require('../utils/healthChecks')
+const { recordRun, REMINDER_JOB } = require('../utils/cronHeartbeat')
 
 // GET/POST /api/cron/send-class-reminders
 // Meant to be hit every 5-10 minutes by Railway's cron scheduler or a free
@@ -24,6 +25,12 @@ async function handleSendReminders(req, res) {
   // second pinger to configure — the work is a cheap indexed lookup that
   // usually finds nothing.
   const { refunded: requestsRefunded } = await refundExpiredRequests()
+
+  // Recorded even when this tick sent nothing — that is what makes a silent
+  // scheduler distinguishable from a quiet one. Never throws, so a failed
+  // heartbeat cannot cost a reminder that already went out.
+  await recordRun(REMINDER_JOB)
+
   res.json({ ...summary, startingSoonNotified, liveNotified, requestsRefunded })
 }
 
