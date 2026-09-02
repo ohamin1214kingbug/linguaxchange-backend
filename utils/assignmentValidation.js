@@ -56,7 +56,77 @@ function validateAssignmentRequest(body = {}) {
   return { ok: true, language_code, level, prompt, body: text }
 }
 
+// Stable keys, translated for display. Storing display strings would orphan
+// existing rows the first time a translation is edited.
+//
+// One shared list across all seven languages for v1. Per-language lists
+// multiply translation work by seven with no evidence yet about which
+// categories reviewers reach for — 'grammar-other' is the escape hatch, and
+// its usage rate is the signal for what to add. Heavy use by Korean reviewers
+// would be the argument for adding particles and spacing.
+const CATEGORIES = [
+  'word-order', 'agreement', 'tense', 'vocabulary', 'register',
+  'spelling', 'punctuation', 'naturalness', 'grammar-other',
+]
+
+const MAX_NOTE = 300
+// Short on purpose. This box is the one place a reviewer could paste a
+// rewritten version, and the policy against corrected text is enforced by the
+// shape of the form rather than by inspection. Short and visible beats long
+// and unpoliced.
+const MAX_OVERALL = 500
+const MAX_ANNOTATIONS = 40
+
+function validateFeedback(input = {}, body = '') {
+  const raw = Array.isArray(input.annotations) ? input.annotations : []
+  if (raw.length === 0) {
+    return { ok: false, error: 'Mark at least one part of the text' }
+  }
+  if (raw.length > MAX_ANNOTATIONS) {
+    return { ok: false, error: `Keep it to ${MAX_ANNOTATIONS} marks or fewer` }
+  }
+
+  const annotations = []
+  for (const a of raw) {
+    const start = Number(a?.start)
+    const end = Number(a?.end)
+    if (!Number.isInteger(start) || !Number.isInteger(end)) {
+      return { ok: false, error: 'A mark is missing its position' }
+    }
+    if (start < 0 || end > body.length) {
+      return { ok: false, error: 'A mark falls outside the text' }
+    }
+    if (end <= start) {
+      return { ok: false, error: 'A mark has to cover at least one character' }
+    }
+
+    const category = String(a?.category || '')
+    if (!CATEGORIES.includes(category)) {
+      return { ok: false, error: 'Pick a category for every mark' }
+    }
+
+    const note = typeof a?.note === 'string' ? a.note.trim() : ''
+    if (!note) return { ok: false, error: 'Say why each mark is wrong' }
+    if (note.length > MAX_NOTE) {
+      return { ok: false, error: `Keep each note to ${MAX_NOTE} characters or fewer` }
+    }
+
+    // Rebuilt rather than spread, so an unexpected field cannot ride into
+    // jsonb and out to the browser.
+    annotations.push({ start, end, category, note })
+  }
+
+  const overall = typeof input.overall === 'string' ? input.overall.trim() : ''
+  if (overall.length > MAX_OVERALL) {
+    return { ok: false, error: `Keep the overall comment to ${MAX_OVERALL} characters or fewer` }
+  }
+
+  return { ok: true, annotations, overall: overall || null }
+}
+
 module.exports = {
   countWords, validateAssignmentRequest, expiresAt,
+  validateFeedback,
   LANGUAGES, LEVELS, MAX_WORDS, MAX_PROMPT, REQUEST_TTL_HOURS,
+  CATEGORIES, MAX_NOTE, MAX_OVERALL, MAX_ANNOTATIONS,
 }
