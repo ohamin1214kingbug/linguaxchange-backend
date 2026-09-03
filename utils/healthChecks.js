@@ -134,6 +134,42 @@ async function checkGoogleOAuth() {
   }
 }
 
+// Both credit RPCs must exist. This is the check that was missing on
+// 2026-08-31, when the commit that made credit changes atomic shipped the code
+// calling spend_credit and add_credit but its migration was never applied.
+// For three days every join, refund and attendance confirmation failed with
+// PGRST202, and nothing reported it — the other checks were green throughout,
+// because none of them touches the functions the whole economy runs through.
+//
+// Probed with a user_id that cannot exist. Both functions are a single
+// conditional UPDATE, so no row matches, nothing is written, and the reply is
+// a null balance. A missing function is the only thing that errors, which is
+// exactly what this is looking for.
+const CREDIT_RPCS = ['spend_credit', 'add_credit']
+const NO_SUCH_USER = -1
+
+async function checkCreditRpcs() {
+  const missing = []
+  for (const fn of CREDIT_RPCS) {
+    try {
+      const { error } = await db().rpc(fn, { p_user_id: NO_SUCH_USER, p_amount: 0 })
+      // PGRST202 is "function not found in the schema cache". Any other error
+      // is reported too rather than swallowed: this path must fail loudly.
+      if (error) missing.push(`${fn} (${error.code || 'error'}: ${error.message})`)
+    } catch (e) {
+      missing.push(`${fn} (${e.message})`)
+    }
+  }
+
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      detail: `credit functions unusable — ${missing.join('; ')}. Every join, refund and attendance confirmation is failing.`
+    }
+  }
+  return { ok: true, detail: 'spend_credit and add_credit both callable' }
+}
+
 async function checkDatabase() {
   try {
     // Cheapest query that still proves the connection and credentials work:
@@ -149,17 +185,21 @@ async function checkDatabase() {
 // Runs every check and reports all of them, rather than stopping at the first
 // failure — when two things break together, the alert should say so.
 async function runHealthChecks() {
-  const [email, google, database, reminders] = await Promise.all([
+  const [email, google, database, credits, reminders] = await Promise.all([
     withTimeout(checkEmail(), 'email'),
     withTimeout(checkGoogleOAuth(), 'google'),
     withTimeout(checkDatabase(), 'database'),
+    // The credit RPCs. A reachable database says nothing about whether the two
+    // functions every credit path calls actually exist — they did not, for
+    // three days, while this endpoint reported healthy.
+    withTimeout(checkCreditRpcs(), 'credits'),
     // The scheduler itself. Added after the reminder job was found dead for
     // five weeks: the three checks above were all green throughout, because
     // none of them could see whether anything was actually calling this API.
     withTimeout(checkHeartbeat(), 'reminders')
   ])
 
-  const checks = { email, google, database, reminders }
+  const checks = { email, google, database, credits, reminders }
   const failing = Object.entries(checks).filter(([, c]) => !c.ok).map(([name]) => name)
 
   return {
@@ -176,4 +216,4 @@ function _resetCache() {
   resendCache = { at: 0, result: null }
 }
 
-module.exports = { runHealthChecks, checkEmail, checkGoogleOAuth, checkDatabase, _resetCache }
+module.exports = { runHealthChecks, checkEmail, checkGoogleOAuth, checkDatabase, checkCreditRpcs, _resetCache }
