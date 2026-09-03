@@ -39,7 +39,16 @@ async function withTimeout(promise, label) {
   let timer
   const timeout = new Promise(resolve => {
     timer = setTimeout(
-      () => resolve({ ok: false, detail: `${label} timed out after ${TIMEOUT_MS}ms` }),
+      () => {
+        // Logged, not only returned. Two intermittent 503s on 2026-09-03 left
+        // no trace anywhere: the endpoint reported the failure to its caller,
+        // but cron-job.org's free tier does not store response bodies, and this
+        // function returned the reason without writing it down. Diagnosing it
+        // took reading Railway's deployment logs to discover they were empty.
+        // One line here makes the next occurrence readable in seconds.
+        console.error(`health check "${label}" timed out after ${TIMEOUT_MS}ms`)
+        resolve({ ok: false, detail: `${label} timed out after ${TIMEOUT_MS}ms` })
+      },
       TIMEOUT_MS
     )
   })
@@ -107,9 +116,24 @@ async function checkEmail(now = Date.now()) {
 // not on the test-user list. Google exposes publishing status only through
 // an authenticated admin API, and an anonymous request looks identical
 // either way. Do not read a passing check here as "Google sign-in works".
-async function checkGoogleOAuth() {
+// Cached like the Resend check, and for a stronger reason: this call downloads
+// roughly 884KB of sign-in page from accounts.google.com to answer a question
+// whose answer changes about once a year. Uncached, it ran every fifteen
+// minutes and was the heaviest thing in this endpoint by an order of
+// magnitude — the likeliest candidate for the intermittent 5s timeouts seen on
+// 2026-09-03, which produced 503s with no logged cause.
+let googleCache = { at: 0, result: null }
+const GOOGLE_CACHE_MS = 30 * 60 * 1000
+
+async function checkGoogleOAuth(now = Date.now()) {
   const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID
   if (!clientId) return { ok: true, detail: 'skipped — GOOGLE_OAUTH_CLIENT_ID not set', skipped: true }
+
+  if (googleCache.result && now - googleCache.at < GOOGLE_CACHE_MS) {
+    return { ...googleCache.result, cached: true }
+  }
+
+  const remember = result => { googleCache = { at: now, result }; return result }
 
   try {
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
@@ -125,11 +149,13 @@ async function checkGoogleOAuth() {
     // so the status code alone proves nothing.
     for (const marker of ['deleted_client', 'invalid_client', 'OAuth client was not found']) {
       if (body.includes(marker)) {
-        return { ok: false, detail: `Google rejected the OAuth client: ${marker}` }
+        return remember({ ok: false, detail: `Google rejected the OAuth client: ${marker}` })
       }
     }
-    return { ok: true, detail: 'OAuth client accepted by Google' }
+    return remember({ ok: true, detail: 'OAuth client accepted by Google' })
   } catch (e) {
+    // Deliberately NOT cached: a transient network failure must not pin a
+    // false negative for half an hour.
     return { ok: false, detail: `could not reach Google: ${e.message}` }
   }
 }
@@ -214,6 +240,7 @@ async function runHealthChecks() {
 // surviving between cases.
 function _resetCache() {
   resendCache = { at: 0, result: null }
+  googleCache = { at: 0, result: null }
 }
 
 module.exports = { runHealthChecks, checkEmail, checkGoogleOAuth, checkDatabase, checkCreditRpcs, _resetCache }
