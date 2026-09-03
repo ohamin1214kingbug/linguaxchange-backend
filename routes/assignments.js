@@ -24,6 +24,25 @@ const SELECT = `
 // column whitelist; the pending and confirmed email columns are not and must
 // stay out.
 
+// PostgREST embeds a to-one relationship as an OBJECT, not an array, and
+// assignment_feedback.request_id is UNIQUE — so it infers one-to-one and
+// returns `{...}` where every consumer expected `[{...}]`.
+//
+// That silently broke three things in production: the board treated every
+// answered request as unanswered (`.length` on an object is undefined), the
+// detail page rendered the annotation editor instead of the feedback because
+// `[0]` was undefined, and the withdraw guard never fired — withdrawing an
+// answered request was refused only by the foreign key, not by the check
+// written to refuse it.
+//
+// Normalised here rather than in each caller, so the API's shape stays stable
+// no matter what PostgREST infers from a future constraint change.
+function withFeedbackArray(row) {
+  if (!row) return row
+  const fb = row.assignment_feedback
+  return { ...row, assignment_feedback: Array.isArray(fb) ? fb : fb ? [fb] : [] }
+}
+
 // GET /api/assignments — the open board. Public, like the class-request
 // board: the point is that reviewers can see demand before signing up.
 // Expiry is evaluated here rather than by a cleanup job, matching
@@ -43,7 +62,12 @@ router.get('/', publicGetLimiter, async (req, res) => {
 
     const { data, error } = await query
     if (error) return fail(res, 400, 'Could not fetch assignment requests', error)
-    res.json(data)
+    // Answered requests leave the board. It exists to show a reviewer what
+    // they can pick up, and the unique constraint on request_id means a second
+    // answer is refused with a 409 — so listing one is an invitation to waste
+    // ten minutes writing feedback that cannot be submitted. The student still
+    // sees it under GET /mine, which is where it belongs.
+    res.json((data || []).map(withFeedbackArray).filter(r => r.assignment_feedback.length === 0))
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not fetch assignment requests' })
@@ -71,7 +95,7 @@ router.get('/mine', requireAuth, async (req, res) => {
       .order('created_at', { ascending: false })
 
     if (error) return fail(res, 400, 'Could not fetch your requests', error)
-    res.json(data)
+    res.json((data || []).map(withFeedbackArray))
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not fetch your requests' })
@@ -93,7 +117,7 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
 
     if (error) return fail(res, 400, 'Could not fetch the request', error)
     if (!data) return res.status(404).json({ error: 'Request not found' })
-    res.json(data)
+    res.json(withFeedbackArray(data))
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not fetch the request' })
@@ -167,7 +191,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
       .maybeSingle()
 
     if (!existing) return res.status(404).json({ error: 'Request not found' })
-    if ((existing.assignment_feedback || []).length > 0) {
+    if (withFeedbackArray(existing).assignment_feedback.length > 0) {
       return res.status(400).json({ error: 'This has already been answered — acknowledge it instead' })
     }
 
