@@ -8,6 +8,7 @@ const { isImplicitAutoSync } = require('../utils/timezonePolicy')
 const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { fail } = require('../utils/failure')
+const { decodeImage } = require('../utils/imageUpload')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
 // owner-only responses add it. notification_preferences and the teaching
@@ -43,7 +44,6 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
   }
 })
 
-const AVATAR_MIME_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
 // POST /api/users/:id/avatar
@@ -55,19 +55,18 @@ router.post('/:id/avatar', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'You can only edit your own profile' })
   }
 
-  const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(req.body.image || '')
-  if (!match) return res.status(400).json({ error: 'Expected a jpeg, png, or webp image' })
+  // Shared decoder: it checks the magic bytes, not just the declared type.
+  // This path used to trust the content type in the data URL, which meant
+  // anything at all could be stored under a .png in a public bucket.
+  const decoded = decodeImage(req.body.image, { maxBytes: MAX_AVATAR_BYTES })
+  if (!decoded.ok) return res.status(400).json({ error: decoded.error })
 
-  const [, mime, base64] = match
-  const buffer = Buffer.from(base64, 'base64')
-  if (buffer.length > MAX_AVATAR_BYTES) return res.status(400).json({ error: 'Image must be under 5MB' })
-
-  const path = `avatars/${req.userId}.${AVATAR_MIME_EXT[mime]}`
+  const path = `avatars/${req.userId}.${decoded.ext}`
 
   try {
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(path, buffer, { contentType: mime, upsert: true })
+      .upload(path, decoded.buffer, { contentType: decoded.mime, upsert: true })
     if (uploadError) return fail(res, 400, 'Could not upload avatar', uploadError)
 
     const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)

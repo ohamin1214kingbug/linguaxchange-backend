@@ -4,9 +4,7 @@ const bcrypt = require('bcrypt')
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { loginLimiter } = require('../middleware/rateLimit')
-const { sendEmail } = require('../utils/mailer')
-const { cancelClass, hasFutureSession } = require('../utils/classCancellation')
-const { anonymizedFields, OWN_DATA_DELETIONS } = require('../utils/accountDeletion')
+const { deleteAccount } = require('../utils/deleteAccount')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -92,52 +90,8 @@ router.post('/delete', requireAuth, loginLimiter, async (req, res) => {
       }
     }
 
-    // Cancel first, while the account still looks normal: cancelClass()
-    // refunds every enrolled student's credit and notifies them. Doing this
-    // after anonymizing would send "your class with Deleted User was
-    // cancelled" and, worse, run refunds against a half-scrubbed account.
-    const { data: classes } = await supabase
-      .from('classes')
-      .select('id, status, class_sessions(id, session_date, status)')
-      .eq('teacher_id', user.id)
-
-    for (const cls of classes || []) {
-      if (cls.status !== 'cancelled' && hasFutureSession(cls.class_sessions || [])) {
-        try {
-          await cancelClass(cls.id, cls)
-        } catch (e) {
-          console.error('[ACCOUNT_DELETE] Could not cancel class', cls.id, e.message)
-        }
-      }
-    }
-
-    for (const { table, column } of OWN_DATA_DELETIONS) {
-      const { error } = await supabase.from(table).delete().eq(column, user.id)
-      if (error) console.error('[ACCOUNT_DELETE] Could not clear', table, error.message)
-    }
-
-    // Forfeited, per policy. The credit_transactions ledger stays intact as
-    // the financial record; only the spendable balance goes.
-    await supabase.from('credits').update({ balance: 0 }).eq('user_id', user.id)
-
-    // Their avatar is public and keyed by user id, so nulling photo_url
-    // alone would leave the image fetchable at a guessable URL forever.
-    await supabase.storage.from('avatars')
-      .remove(['jpg', 'png', 'webp'].map(ext => `avatars/${user.id}.${ext}`))
-
-    const { error: anonError } = await supabase
-      .from('users')
-      .update(anonymizedFields(user.id))
-      .eq('id', user.id)
-
-    if (anonError) return res.status(500).json({ error: 'Could not delete your account' })
-
-    // Last use of the real address, after the DB work succeeded.
-    await sendEmail({
-      to: user.email,
-      subject: 'Your LinguaXchange account has been deleted',
-      text: `Hi ${user.first_name},\n\nYour LinguaXchange account has been deleted and your personal details have been removed.\n\nClasses you had scheduled were cancelled and the students enrolled in them were refunded. Records of past classes and credit transactions are kept without your name attached, because other members' history and our financial records depend on them.\n\nIf you didn't request this, reply to this email immediately.`
-    }).catch(e => console.error('[ACCOUNT_DELETE] Confirmation email failed', e.message))
+    const result = await deleteAccount(supabase, user)
+    if (!result.ok) return res.status(500).json({ error: 'Could not delete your account' })
 
     res.json({ message: 'Account deleted' })
   } catch (e) {
