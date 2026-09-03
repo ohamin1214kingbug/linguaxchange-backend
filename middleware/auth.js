@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken')
 const { createClient } = require('@supabase/supabase-js')
 const { isTokenStillValid } = require('../utils/tokenRevocation')
+const { isSuspended } = require('../utils/suspension')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -21,12 +22,24 @@ async function requireAuth(req, res, next) {
     // even though it hasn't expired yet.
     const { data: user } = await supabase
       .from('users')
-      .select('token_valid_after')
+      .select('token_valid_after, suspended_until, suspension_reason')
       .eq('id', payload.userId)
       .single()
 
     if (!isTokenStillValid(payload.iat, user?.token_valid_after)) {
       return res.status(401).json({ error: 'Invalid or expired token' })
+    }
+
+    // Checked on the row this middleware already fetches, so a suspension
+    // costs no extra query. Every authenticated route is covered by the
+    // check living here, rather than by remembering to add a guard to each.
+    const suspension = isSuspended({ suspendedUntil: user?.suspended_until })
+    if (suspension.suspended) {
+      return res.status(403).json({
+        error: 'Your account is suspended',
+        suspended_until: suspension.until.toISOString(),
+        reason: user.suspension_reason || null
+      })
     }
 
     req.userId = payload.userId
