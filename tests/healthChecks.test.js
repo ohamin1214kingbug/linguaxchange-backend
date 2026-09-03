@@ -147,3 +147,71 @@ describe('runHealthChecks', () => {
     expect(r.failing).toEqual(expect.arrayContaining(['email', 'google']))
   })
 })
+
+// Added after the outage this check exists to catch: on 2026-08-31 the commit
+// that made credit changes atomic shipped code calling spend_credit and
+// add_credit, but its migration was never applied. For three days every join,
+// refund and attendance confirmation failed with PGRST202 while this endpoint
+// reported healthy, because nothing here touched the functions.
+describe('checkCreditRpcs', () => {
+  const load = stub => {
+    jest.resetModules()
+    jest.doMock('@supabase/supabase-js', () => ({ createClient: () => stub }))
+    return require('../utils/healthChecks')
+  }
+
+  afterEach(() => { jest.resetModules(); jest.restoreAllMocks() })
+
+  test('passes when both functions answer', async () => {
+    const { checkCreditRpcs } = load({ rpc: async () => ({ data: null, error: null }) })
+    const r = await checkCreditRpcs()
+    expect(r.ok).toBe(true)
+    expect(r.detail).toContain('spend_credit')
+    expect(r.detail).toContain('add_credit')
+  })
+
+  test('fails, naming the function, when one is missing', async () => {
+    // The real shape of the 2026-08-31 outage.
+    const { checkCreditRpcs } = load({
+      rpc: async fn => fn === 'spend_credit'
+        ? { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.spend_credit' } }
+        : { data: null, error: null }
+    })
+    const r = await checkCreditRpcs()
+    expect(r.ok).toBe(false)
+    expect(r.detail).toContain('spend_credit')
+    expect(r.detail).toContain('PGRST202')
+    // The alert has to say what it means, not just what failed.
+    expect(r.detail).toMatch(/join, refund and attendance/i)
+  })
+
+  test('fails when both are missing, naming both', async () => {
+    const { checkCreditRpcs } = load({
+      rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'not found' } })
+    })
+    const r = await checkCreditRpcs()
+    expect(r.ok).toBe(false)
+    expect(r.detail).toContain('spend_credit')
+    expect(r.detail).toContain('add_credit')
+  })
+
+  test('reports a thrown error rather than passing', async () => {
+    const { checkCreditRpcs } = load({ rpc: async () => { throw new Error('ECONNREFUSED') } })
+    const r = await checkCreditRpcs()
+    expect(r.ok).toBe(false)
+    expect(r.detail).toContain('ECONNREFUSED')
+  })
+
+  test('probes a user id that cannot match, so nothing is written', async () => {
+    const calls = []
+    const { checkCreditRpcs } = load({
+      rpc: async (fn, args) => { calls.push({ fn, args }); return { data: null, error: null } }
+    })
+    await checkCreditRpcs()
+    expect(calls).toHaveLength(2)
+    for (const c of calls) {
+      expect(c.args.p_amount).toBe(0)
+      expect(c.args.p_user_id).toBeLessThan(0)
+    }
+  })
+})
