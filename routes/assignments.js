@@ -5,7 +5,7 @@ const { requireAuth } = require('../middleware/auth')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { fail } = require('../utils/failure')
 const { validateAssignmentRequest, expiresAt, MAX_OPEN_PER_USER } = require('../utils/assignmentValidation')
-const { chargeForRequest, refundForRequest } = require('../utils/requestCredits')
+const { chargeForRequest, refundForRequest, REQUEST_COST } = require('../utils/requestCredits')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
 
@@ -105,7 +105,16 @@ router.post('/', requireAuth, async (req, res) => {
       .single()
 
     if (error) {
-      await refundForRequest(req.userId, 'Assignment request could not be posted')
+      const refund = await refundForRequest(req.userId, 'Assignment request could not be posted')
+      // There is no row to retry from — the insert is what failed — so a
+      // failed refund here is a banana the student paid for nothing. Nothing
+      // sweeps this up, so the only recovery is a human reading this line.
+      if (!refund.ok) {
+        console.error(
+          'assignments: refund after a failed insert did not apply — user', req.userId,
+          'is owed', REQUEST_COST, 'credit(s) and nothing will retry it, needs a manual fix'
+        )
+      }
       return fail(res, 400, 'Could not post your request', error)
     }
     res.status(201).json(data)
@@ -147,7 +156,16 @@ router.delete('/:id', requireAuth, async (req, res) => {
     if (error) return fail(res, 400, 'Could not withdraw your request', error)
     if (!deleted || deleted.length === 0) return res.status(404).json({ error: 'Request not found' })
 
-    await refundForRequest(req.userId, 'Assignment request withdrawn')
+    // The row is gone, so unlike the cron sweeps there is no claim to un-set
+    // and nothing left to retry from. A failed refund is a permanently lost
+    // banana; log it loudly so it is at least discoverable.
+    const refund = await refundForRequest(req.userId, 'Assignment request withdrawn')
+    if (!refund.ok) {
+      console.error(
+        'assignments: withdrawal refund did not apply — request', req.params.id, 'is deleted and user',
+        req.userId, 'is owed', REQUEST_COST, 'credit(s) with nothing to retry from, needs a manual fix'
+      )
+    }
     res.json({ success: true })
   } catch (e) {
     console.error(e)
