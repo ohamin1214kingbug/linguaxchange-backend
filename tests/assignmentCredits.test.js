@@ -131,21 +131,22 @@ describe('releaseFeedbackCredit', () => {
     ])
   })
 
-  test('reports failure without inserting when the payout RPC errors', async () => {
+  test('reports a retryable failure without inserting when the payout RPC errors', async () => {
     mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'rpc down' } })
 
     const result = await releaseFeedbackCredit(42)
 
-    expect(result).toEqual({ ok: false })
+    // Nothing happened — add_credit never ran — so a caller may safely retry.
+    expect(result).toEqual({ ok: false, retryable: true })
     expect(mockInsert).not.toHaveBeenCalled()
   })
 
-  test('reports failure without inserting when the payout RPC returns no row (no credits row)', async () => {
+  test('reports a retryable failure without inserting when the payout RPC returns no row (no credits row)', async () => {
     mockRpc.mockResolvedValueOnce({ data: null, error: null })
 
     const result = await releaseFeedbackCredit(42)
 
-    expect(result).toEqual({ ok: false })
+    expect(result).toEqual({ ok: false, retryable: true })
     expect(mockInsert).not.toHaveBeenCalled()
   })
 
@@ -153,7 +154,7 @@ describe('releaseFeedbackCredit', () => {
   // weekly cap unenforceable in production (see migrations/add_assignment_feedback.sql).
   // The fix must notice the insert failed, reverse the payout via spend_credit,
   // and report failure — never claim success with no audit row.
-  test('reverses the payout and reports failure when the audit insert fails', async () => {
+  test('reverses the payout and reports a retryable failure when the audit insert fails', async () => {
     mockRpc
       .mockResolvedValueOnce({ data: 5, error: null }) // add_credit
       .mockResolvedValueOnce({ data: 4, error: null }) // spend_credit reversal
@@ -161,11 +162,17 @@ describe('releaseFeedbackCredit', () => {
 
     const result = await releaseFeedbackCredit(42)
 
-    expect(result).toEqual({ ok: false })
+    // The reversal undid the payout, so net effect is nothing happened —
+    // safe to retry.
+    expect(result).toEqual({ ok: false, retryable: true })
     expect(mockRpc).toHaveBeenNthCalledWith(2, 'spend_credit', { p_user_id: 42, p_amount: 1 })
   })
 
-  test('logs when the reversal itself cannot be applied, leaving balance and audit log out of sync', async () => {
+  // FINDING (fix round 2): when the reversal itself also fails, the credit
+  // WAS granted and cannot be taken back — retrying would add_credit a
+  // second time on top of this one. The caller must be told this is NOT
+  // retryable, or it will double-pay on the next tick.
+  test('reports a non-retryable failure when the reversal itself cannot be applied, leaving balance and audit log out of sync', async () => {
     mockRpc
       .mockResolvedValueOnce({ data: 5, error: null }) // add_credit
       .mockResolvedValueOnce({ data: null, error: { message: 'balance already spent' } }) // reversal fails
@@ -174,7 +181,7 @@ describe('releaseFeedbackCredit', () => {
 
     const result = await releaseFeedbackCredit(42)
 
-    expect(result).toEqual({ ok: false })
+    expect(result).toEqual({ ok: false, retryable: false })
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('out of sync'),
       42,
@@ -225,6 +232,31 @@ describe('releaseDueFeedback', () => {
     expect(result).toEqual({ released: 0 })
     expect(clearBuilder.update).toHaveBeenCalledWith({ credit_released_at: null })
     expect(clearBuilder.eq).toHaveBeenCalledWith('id', 7)
+  })
+
+  // FINDING (fix round 2): add_credit succeeds, the audit insert fails, AND
+  // the spend_credit reversal also fails — the credit is genuinely out
+  // there with no audit row. Clearing the claim here would let the next
+  // tick call releaseFeedbackCredit again and add_credit a second time on
+  // top of the first, double-paying the reviewer. The row must stay marked
+  // released, and released must not count a payout that never got recorded.
+  test('a desynced payout (insert AND reversal both fail) is not retried and not counted', async () => {
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 7, reviewer_id: 3 }], error: null })) // due lookup
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 7 }], error: null })) // claim wins
+    mockRpc
+      .mockResolvedValueOnce({ data: 5, error: null }) // add_credit succeeds
+      .mockResolvedValueOnce({ data: null, error: { message: 'balance already spent' } }) // reversal fails
+    mockInsert.mockResolvedValueOnce({ error: { message: 'insert failed' } })
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+
+    const result = await releaseDueFeedback(now)
+
+    expect(result).toEqual({ released: 0 })
+    // Only 3 .from() calls total: the due lookup, the claim, and the audit
+    // insert inside releaseFeedbackCredit — no fourth call to clear the claim.
+    expect(mockFrom).toHaveBeenCalledTimes(3)
+
+    errorSpy.mockRestore()
   })
 })
 

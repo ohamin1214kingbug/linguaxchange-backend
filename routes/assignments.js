@@ -268,17 +268,32 @@ router.post('/:id/acknowledge', requireAuth, async (req, res) => {
 
     const payout = await releaseFeedbackCredit(released[0].reviewer_id)
     if (!payout.ok) {
-      // The claim above already flipped credit_released_at; a failed payout
-      // must not leave that standing, or the row is stuck "released" with no
-      // pay and no retry (same reasoning as releaseDueFeedback's compensation).
-      // Clearing it means a second click, or the cron sweep once
-      // AUTO_RELEASE_HOURS has passed, will claim and pay this row again.
-      const { error: clearError } = await supabase
-        .from('assignment_feedback')
-        .update({ credit_released_at: null })
-        .eq('id', released[0].id)
-      if (clearError) {
-        console.error('acknowledge: could not un-claim row after failed payout', released[0].id, clearError)
+      // The claim above already flipped credit_released_at. A retryable
+      // failure must not leave that standing, or the row is stuck "released"
+      // with no pay and no retry — clearing it means a second click, or the
+      // cron sweep once AUTO_RELEASE_HOURS has passed, will claim and pay
+      // this row again. A non-retryable failure (the credit was granted and
+      // could not be reversed, see releaseFeedbackCredit) must NOT be
+      // cleared — retrying would pay the reviewer a second time, so the
+      // claim is left standing on purpose and the desync is logged loudly.
+      if (payout.retryable) {
+        const { error: clearError } = await supabase
+          .from('assignment_feedback')
+          .update({ credit_released_at: null })
+          .eq('id', released[0].id)
+        if (clearError) {
+          console.error(
+            'acknowledge: could not un-claim feedback', released[0].id,
+            '— row is now stuck marked released with NO payout and will never be retried, needs a manual fix',
+            clearError
+          )
+        }
+      } else {
+        console.error(
+          'acknowledge: feedback', released[0].id, 'reviewer', released[0].reviewer_id,
+          'was paid but its audit row and reversal both failed — balance and audit log are out of sync;',
+          'leaving credit_released_at set to avoid a double payout, needs a manual fix'
+        )
       }
       return res.status(500).json({ success: false, error: 'Acknowledged, but the credit release failed. Try again.' })
     }

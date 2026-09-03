@@ -74,14 +74,14 @@ describe('POST /:id/acknowledge', () => {
     expect(mockReleaseFeedbackCredit).not.toHaveBeenCalled()
   })
 
-  // FINDING 1/2 (fix round 1): a failed payout must not be reported as
+  // FINDING 1/2 (fix round 1): a retryable failure must not be reported as
   // success, and the row must not be left marked released with no pay — the
   // route clears credit_released_at back to null on this same row so a retry
   // (another click, or the cron sweep) can claim and pay it again.
-  test('a failed payout is not reported as success, and the claim is cleared for a retry', async () => {
+  test('a retryable failure is not reported as success, and the claim is cleared for a retry', async () => {
     mockFrom.mockReturnValueOnce(chain({ data: { id: 5, student_id: 1 }, error: null })) // find the request
     mockFrom.mockReturnValueOnce(chain({ data: [{ id: 9, reviewer_id: 2 }], error: null })) // claim
-    mockReleaseFeedbackCredit.mockResolvedValueOnce({ ok: false })
+    mockReleaseFeedbackCredit.mockResolvedValueOnce({ ok: false, retryable: true })
     const clearBuilder = chain({ data: null, error: null })
     mockFrom.mockReturnValueOnce(clearBuilder) // the compensating un-claim
 
@@ -91,5 +91,24 @@ describe('POST /:id/acknowledge', () => {
     expect(res.body.success).toBe(false)
     expect(clearBuilder.update).toHaveBeenCalledWith({ credit_released_at: null })
     expect(clearBuilder.eq).toHaveBeenCalledWith('id', 9)
+  })
+
+  // FINDING (fix round 2): a non-retryable failure means releaseFeedbackCredit
+  // already granted the credit and could not reverse it — clearing the claim
+  // here would let a second click (or the cron sweep) pay the same reviewer
+  // again. The row must stay marked released, so no third .from() call happens.
+  test('a non-retryable failure (desync) still fails the request but does not clear the claim', async () => {
+    mockFrom.mockReturnValueOnce(chain({ data: { id: 5, student_id: 1 }, error: null })) // find the request
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 9, reviewer_id: 2 }], error: null })) // claim
+    mockReleaseFeedbackCredit.mockResolvedValueOnce({ ok: false, retryable: false })
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await dispatch(acknowledgeReq(5))
+
+    expect(res.statusCode).toBe(500)
+    expect(res.body.success).toBe(false)
+    expect(mockFrom).toHaveBeenCalledTimes(2) // no third call to clear the claim
+
+    errorSpy.mockRestore()
   })
 })

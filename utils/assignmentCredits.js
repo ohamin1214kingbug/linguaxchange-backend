@@ -68,12 +68,18 @@ async function countFeedbackEarnings(userId, since = windowStart()) {
 // since there's no further atomic recovery available. Either way the caller
 // gets { ok: false } — a payout that couldn't be recorded is never reported
 // as a success.
+//
+// `retryable` tells the caller whether it's safe to retry (nothing happened,
+// or the reversal above already undid it) or not (the credit was granted and
+// could NOT be reversed — a retry would add_credit a second time on top of
+// this one, paying twice). Callers that clear a claim to allow a retry must
+// check this first; see releaseDueFeedback below (fix round 2, review finding).
 async function releaseFeedbackCredit(reviewerId) {
   const { data: balanceAfter, error } = await db()
     .rpc('add_credit', { p_user_id: reviewerId, p_amount: 1 })
   if (error || balanceAfter === null) {
     console.error('feedback credit release failed', error)
-    return { ok: false }
+    return { ok: false, retryable: true }
   }
 
   const { error: insertError } = await db().from('credit_transactions').insert([{
@@ -93,9 +99,10 @@ async function releaseFeedbackCredit(reviewerId) {
         'feedback credit reversal failed — balance and audit log are now out of sync for user',
         reviewerId, reversalError
       )
+      return { ok: false, retryable: false }
     }
 
-    return { ok: false }
+    return { ok: false, retryable: true }
   }
 
   return { ok: true, balance: balanceAfter }
@@ -131,19 +138,32 @@ async function releaseDueFeedback(now = new Date()) {
         const payout = await releaseFeedbackCredit(row.reviewer_id)
         if (payout.ok) {
           released++
-        } else {
+        } else if (payout.retryable) {
           // The claim flipped credit_released_at before the payout ran, so a
-          // failed payout must not leave it set — that would hide the row
+          // retryable failure must not leave it set — that would hide the row
           // from this same WHERE clause forever, "released" with no pay and
-          // no retry. Same shape as releaseFeedbackCredit's own reversal of
-          // add_credit when its audit insert fails.
+          // no retry.
           const { error: clearError } = await db()
             .from('assignment_feedback')
             .update({ credit_released_at: null })
             .eq('id', row.id)
           if (clearError) {
-            console.error('releaseDueFeedback: could not un-claim row after failed payout', row.id, clearError)
+            console.error(
+              'releaseDueFeedback: could not un-claim feedback', row.id,
+              '— row is now stuck marked released with NO payout and will never be retried, needs a manual fix',
+              clearError
+            )
           }
+        } else {
+          // Not retryable: releaseFeedbackCredit already granted the credit
+          // and could not reverse it. Clearing the claim here would let the
+          // next tick pay the same reviewer a second time, so the claim is
+          // left standing on purpose — loud because nothing else will retry it.
+          console.error(
+            'releaseDueFeedback: feedback', row.id, 'reviewer', row.reviewer_id,
+            'was paid but its audit row and reversal both failed — balance and audit log are out of sync;',
+            'leaving credit_released_at set to avoid a double payout, needs a manual fix'
+          )
         }
       }
     }
@@ -178,19 +198,25 @@ async function refundExpiredAssignments(now = new Date()) {
         .select('id')
 
       if (claimed && claimed.length > 0) {
+        // Unlike releaseFeedbackCredit, refundForRequest has no reversal step
+        // of its own — its only failure mode is add_credit itself not running
+        // (it returns { ok: false } before ever touching credit_transactions),
+        // so there is no "granted but couldn't be recorded" desync to guard
+        // against here. Every refund.ok === false is safe to retry.
         const refund = await refundForRequest(row.student_id, 'Assignment request expired unanswered')
         if (refund.ok) {
           refunded++
         } else {
-          // Same compensation as releaseDueFeedback above: undo the claim so
-          // a later tick retries instead of a failed refund being recorded
-          // as done forever.
           const { error: clearError } = await db()
             .from('assignment_requests')
             .update({ credit_refunded_at: null })
             .eq('id', row.id)
           if (clearError) {
-            console.error('refundExpiredAssignments: could not un-claim row after failed refund', row.id, clearError)
+            console.error(
+              'refundExpiredAssignments: could not un-claim request', row.id,
+              '— row is now stuck marked refunded with NO refund and will never be retried, needs a manual fix',
+              clearError
+            )
           }
         }
       }
