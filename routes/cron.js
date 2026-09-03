@@ -3,6 +3,7 @@ const router = express.Router()
 const { sendClassReminders } = require('../utils/classReminder')
 const { sendStartingSoonNotifications, sendLiveNotifications } = require('../utils/inAppNotifications')
 const { refundExpiredRequests } = require('../utils/requestCredits')
+const { releaseDueFeedback, refundExpiredAssignments } = require('../utils/assignmentCredits')
 const { runHealthChecks } = require('../utils/healthChecks')
 const { recordRun, REMINDER_JOB } = require('../utils/cronHeartbeat')
 
@@ -26,12 +27,21 @@ async function handleSendReminders(req, res) {
   // usually finds nothing.
   const { refunded: requestsRefunded } = await refundExpiredRequests()
 
+  // Same shape as requestsRefunded above: an unresponsive student shouldn't
+  // leave a reviewer unpaid, and an unanswered request shouldn't cost the
+  // student who posted it.
+  const { released: feedbackReleased } = await releaseDueFeedback()
+  const { refunded: assignmentsRefunded } = await refundExpiredAssignments()
+
   // Recorded even when this tick sent nothing — that is what makes a silent
   // scheduler distinguishable from a quiet one. Never throws, so a failed
   // heartbeat cannot cost a reminder that already went out.
   await recordRun(REMINDER_JOB)
 
-  res.json({ ...summary, startingSoonNotified, liveNotified, requestsRefunded })
+  res.json({
+    ...summary, startingSoonNotified, liveNotified, requestsRefunded,
+    feedbackReleased, assignmentsRefunded,
+  })
 }
 
 router.get('/send-class-reminders', handleSendReminders)
