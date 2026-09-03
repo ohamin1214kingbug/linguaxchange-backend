@@ -215,3 +215,76 @@ describe('checkCreditRpcs', () => {
     }
   })
 })
+
+// Added after two intermittent 503s on 2026-09-03 that left no diagnosable
+// trace: the endpoint reported which check failed in its response body, but
+// cron-job.org's free tier does not store bodies, and Railway's logs were
+// empty because withTimeout returned the reason without writing it down.
+describe('timeout visibility and Google caching', () => {
+  const originalFetch = global.fetch
+  const originalEnv = { ...process.env }
+
+  const load = () => { jest.resetModules(); return require('../utils/healthChecks') }
+
+  afterEach(() => {
+    global.fetch = originalFetch
+    process.env = { ...originalEnv }
+    jest.restoreAllMocks()
+  })
+
+  test('the Google check is cached, so it does not re-download 884KB every run', async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-client'
+    process.env.SUPABASE_URL = 'https://example.supabase.co'
+    let calls = 0
+    global.fetch = async () => { calls++; return { text: async () => '<html>Sign in</html>' } }
+
+    const { checkGoogleOAuth } = load()
+    await checkGoogleOAuth(1000)
+    const second = await checkGoogleOAuth(1000 + 10 * 60_000)   // ten minutes later
+
+    expect(calls).toBe(1)
+    expect(second.cached).toBe(true)
+  })
+
+  test('it re-checks once the cache window has passed', async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-client'
+    process.env.SUPABASE_URL = 'https://example.supabase.co'
+    let calls = 0
+    global.fetch = async () => { calls++; return { text: async () => '<html>Sign in</html>' } }
+
+    const { checkGoogleOAuth } = load()
+    await checkGoogleOAuth(1000)
+    await checkGoogleOAuth(1000 + 31 * 60_000)
+
+    expect(calls).toBe(2)
+  })
+
+  test('a rejected client is cached too — a real failure should not be re-fetched every run', async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-client'
+    process.env.SUPABASE_URL = 'https://example.supabase.co'
+    let calls = 0
+    global.fetch = async () => { calls++; return { text: async () => '<html>deleted_client</html>' } }
+
+    const { checkGoogleOAuth } = load()
+    const first = await checkGoogleOAuth(1000)
+    const second = await checkGoogleOAuth(1000 + 60_000)
+
+    expect(first.ok).toBe(false)
+    expect(second.ok).toBe(false)
+    expect(calls).toBe(1)
+  })
+
+  test('an unreachable Google is NOT cached, so a blip cannot pin a false negative', async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'test-client'
+    process.env.SUPABASE_URL = 'https://example.supabase.co'
+    let calls = 0
+    global.fetch = async () => { calls++; throw new Error('ETIMEDOUT') }
+
+    const { checkGoogleOAuth } = load()
+    await checkGoogleOAuth(1000)
+    await checkGoogleOAuth(1000 + 60_000)
+
+    // Both calls hit the network: a transient failure must not stick.
+    expect(calls).toBe(2)
+  })
+})
