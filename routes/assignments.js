@@ -50,6 +50,34 @@ router.get('/', publicGetLimiter, async (req, res) => {
   }
 })
 
+// GET /api/assignments/mine — the caller's own requests, expired or not.
+//
+// Declared before GET /:id, or Express matches "mine" as an id.
+//
+// Deliberately NOT a ?mine=1 flag on the public board. That route is
+// unauthenticated and rate-limited for scrapers; this one is authenticated and
+// returns personal data. Sharing a handler between those two is how a public
+// endpoint quietly starts serving someone's own rows.
+//
+// No expiry filter, which is the whole point. The board drops a request at 72
+// hours, but a student whose request was answered at hour 70 still needs to
+// read the feedback they paid for — and the reviewer is paid for it either way.
+router.get('/mine', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('assignment_requests')
+      .select(SELECT)
+      .eq('student_id', req.userId)
+      .order('created_at', { ascending: false })
+
+    if (error) return fail(res, 400, 'Could not fetch your requests', error)
+    res.json(data)
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not fetch your requests' })
+  }
+})
+
 // GET /api/assignments/:id — one request, expired or not.
 //
 // Separate from the board because the board filters on expires_at: an
