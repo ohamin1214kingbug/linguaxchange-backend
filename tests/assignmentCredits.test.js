@@ -7,24 +7,53 @@
 const mockGte = jest.fn()
 const mockInsert = jest.fn()
 const mockRpc = jest.fn()
+const mockFrom = jest.fn()
+
+// The fixed shape countFeedbackEarnings/releaseFeedbackCredit's tests below
+// already rely on — kept as mockFrom's default so those tests need no
+// changes. releaseDueFeedback/refundExpiredAssignments issue different
+// .from() chains (select/is/lt, then update/eq/is/select) per call, so their
+// tests override mockFrom per-call with chain() instead of using this default.
+function defaultFromImpl() {
+  return {
+    select: () => ({ eq: () => ({ eq: () => ({ gte: (...args) => mockGte(...args) }) }) }),
+    insert: (...args) => mockInsert(...args),
+  }
+}
 
 jest.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    from: () => ({
-      select: () => ({ eq: () => ({ eq: () => ({ gte: (...args) => mockGte(...args) }) }) }),
-      insert: (...args) => mockInsert(...args),
-    }),
+    from: (...args) => mockFrom(...args),
     rpc: (...args) => mockRpc(...args),
   }),
+}))
+
+jest.mock('../utils/requestCredits', () => ({
+  refundForRequest: jest.fn(),
 }))
 
 const {
   isOverCap, countFeedbackEarnings, releaseFeedbackCredit, windowStart,
   WEEKLY_FEEDBACK_CAP, FEEDBACK_TYPE, WINDOW_DAYS,
+  releaseDueFeedback, refundExpiredAssignments,
 } = require('../utils/assignmentCredits')
+const { refundForRequest } = require('../utils/requestCredits')
+
+// Minimal chainable Postgrest-style builder: every method returns itself,
+// and awaiting it resolves to `result` — enough to drive the select/update/
+// is/lt chains in releaseDueFeedback and refundExpiredAssignments without
+// reproducing the real Supabase client.
+function chain(result) {
+  const builder = {}
+  const methods = ['select', 'eq', 'is', 'lt', 'update']
+  methods.forEach((m) => { builder[m] = jest.fn(() => builder) })
+  builder.then = (resolve) => resolve(result)
+  return builder
+}
 
 beforeEach(() => {
   jest.resetAllMocks()
+  mockFrom.mockImplementation(defaultFromImpl)
 })
 
 describe('isOverCap', () => {
@@ -153,5 +182,98 @@ describe('releaseFeedbackCredit', () => {
     )
 
     errorSpy.mockRestore()
+  })
+})
+
+describe('releaseDueFeedback', () => {
+  const now = new Date('2026-09-03T12:00:00Z')
+
+  test('a row whose claim loses the race to another tick is not paid out', async () => {
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 7, reviewer_id: 3 }], error: null })) // due lookup
+    mockFrom.mockReturnValueOnce(chain({ data: [], error: null })) // claim lost — another tick got it first
+
+    const result = await releaseDueFeedback(now)
+
+    expect(result).toEqual({ released: 0 })
+    expect(mockRpc).not.toHaveBeenCalled() // releaseFeedbackCredit never ran
+  })
+
+  test('a claimed row is paid and counted', async () => {
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 7, reviewer_id: 3 }], error: null })) // due lookup
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 7 }], error: null })) // claim wins
+    mockRpc.mockResolvedValueOnce({ data: 6, error: null }) // add_credit
+    mockInsert.mockResolvedValueOnce({ error: null }) // audit row
+
+    const result = await releaseDueFeedback(now)
+
+    expect(result).toEqual({ released: 1 })
+    expect(mockRpc).toHaveBeenCalledWith('add_credit', { p_user_id: 3, p_amount: 1 })
+  })
+
+  // FINDING 1 (fix round 1): a failed payout must not leave credit_released_at
+  // set, or the row is stuck "released" with no pay and no retry, forever
+  // invisible to this same WHERE clause.
+  test('a failed payout clears the claim so a later tick can retry', async () => {
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 7, reviewer_id: 3 }], error: null })) // due lookup
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 7 }], error: null })) // claim wins
+    mockRpc.mockResolvedValueOnce({ data: null, error: { message: 'add_credit down' } }) // payout fails
+    const clearBuilder = chain({ data: null, error: null })
+    mockFrom.mockReturnValueOnce(clearBuilder) // the compensating un-claim
+
+    const result = await releaseDueFeedback(now)
+
+    expect(result).toEqual({ released: 0 })
+    expect(clearBuilder.update).toHaveBeenCalledWith({ credit_released_at: null })
+    expect(clearBuilder.eq).toHaveBeenCalledWith('id', 7)
+  })
+})
+
+describe('refundExpiredAssignments', () => {
+  const now = new Date('2026-09-03T12:00:00Z')
+
+  test('an answered request is not refunded as expired', async () => {
+    mockFrom.mockReturnValueOnce(chain({
+      data: [{ id: 11, student_id: 5, assignment_feedback: [{ id: 99 }] }],
+      error: null,
+    })) // stale lookup: the one row found has already been answered
+
+    const result = await refundExpiredAssignments(now)
+
+    expect(result).toEqual({ refunded: 0 })
+    expect(refundForRequest).not.toHaveBeenCalled()
+    expect(mockFrom).toHaveBeenCalledTimes(1) // skipped before any claim update
+  })
+
+  test('an unanswered expired request is refunded', async () => {
+    mockFrom.mockReturnValueOnce(chain({
+      data: [{ id: 12, student_id: 6, assignment_feedback: [] }],
+      error: null,
+    }))
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 12 }], error: null })) // claim wins
+    refundForRequest.mockResolvedValueOnce({ ok: true, balance: 2 })
+
+    const result = await refundExpiredAssignments(now)
+
+    expect(result).toEqual({ refunded: 1 })
+    expect(refundForRequest).toHaveBeenCalledWith(6, 'Assignment request expired unanswered')
+  })
+
+  // Same compensation as releaseDueFeedback above: a failed refund must not
+  // leave credit_refunded_at set, or the student never gets their banana back.
+  test('a failed refund clears the claim so a later tick can retry', async () => {
+    mockFrom.mockReturnValueOnce(chain({
+      data: [{ id: 12, student_id: 6, assignment_feedback: [] }],
+      error: null,
+    }))
+    mockFrom.mockReturnValueOnce(chain({ data: [{ id: 12 }], error: null })) // claim wins
+    refundForRequest.mockResolvedValueOnce({ ok: false })
+    const clearBuilder = chain({ data: null, error: null })
+    mockFrom.mockReturnValueOnce(clearBuilder) // the compensating un-claim
+
+    const result = await refundExpiredAssignments(now)
+
+    expect(result).toEqual({ refunded: 0 })
+    expect(clearBuilder.update).toHaveBeenCalledWith({ credit_refunded_at: null })
+    expect(clearBuilder.eq).toHaveBeenCalledWith('id', 12)
   })
 })

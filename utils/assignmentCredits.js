@@ -128,8 +128,23 @@ async function releaseDueFeedback(now = new Date()) {
         .select('id')
 
       if (claimed && claimed.length > 0) {
-        await releaseFeedbackCredit(row.reviewer_id)
-        released++
+        const payout = await releaseFeedbackCredit(row.reviewer_id)
+        if (payout.ok) {
+          released++
+        } else {
+          // The claim flipped credit_released_at before the payout ran, so a
+          // failed payout must not leave it set — that would hide the row
+          // from this same WHERE clause forever, "released" with no pay and
+          // no retry. Same shape as releaseFeedbackCredit's own reversal of
+          // add_credit when its audit insert fails.
+          const { error: clearError } = await db()
+            .from('assignment_feedback')
+            .update({ credit_released_at: null })
+            .eq('id', row.id)
+          if (clearError) {
+            console.error('releaseDueFeedback: could not un-claim row after failed payout', row.id, clearError)
+          }
+        }
       }
     }
   } catch (e) {
@@ -163,8 +178,21 @@ async function refundExpiredAssignments(now = new Date()) {
         .select('id')
 
       if (claimed && claimed.length > 0) {
-        await refundForRequest(row.student_id, 'Assignment request expired unanswered')
-        refunded++
+        const refund = await refundForRequest(row.student_id, 'Assignment request expired unanswered')
+        if (refund.ok) {
+          refunded++
+        } else {
+          // Same compensation as releaseDueFeedback above: undo the claim so
+          // a later tick retries instead of a failed refund being recorded
+          // as done forever.
+          const { error: clearError } = await db()
+            .from('assignment_requests')
+            .update({ credit_refunded_at: null })
+            .eq('id', row.id)
+          if (clearError) {
+            console.error('refundExpiredAssignments: could not un-claim row after failed refund', row.id, clearError)
+          }
+        }
       }
     }
   } catch (e) {

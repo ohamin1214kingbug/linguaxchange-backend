@@ -266,7 +266,22 @@ router.post('/:id/acknowledge', requireAuth, async (req, res) => {
       return res.json({ success: true, already: true })
     }
 
-    await releaseFeedbackCredit(released[0].reviewer_id)
+    const payout = await releaseFeedbackCredit(released[0].reviewer_id)
+    if (!payout.ok) {
+      // The claim above already flipped credit_released_at; a failed payout
+      // must not leave that standing, or the row is stuck "released" with no
+      // pay and no retry (same reasoning as releaseDueFeedback's compensation).
+      // Clearing it means a second click, or the cron sweep once
+      // AUTO_RELEASE_HOURS has passed, will claim and pay this row again.
+      const { error: clearError } = await supabase
+        .from('assignment_feedback')
+        .update({ credit_released_at: null })
+        .eq('id', released[0].id)
+      if (clearError) {
+        console.error('acknowledge: could not un-claim row after failed payout', released[0].id, clearError)
+      }
+      return res.status(500).json({ success: false, error: 'Acknowledged, but the credit release failed. Try again.' })
+    }
     res.json({ success: true })
   } catch (e) {
     console.error(e)
