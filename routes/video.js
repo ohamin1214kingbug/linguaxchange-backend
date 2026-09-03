@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { buildRoomName } = require('../utils/roomName')
 const { buildJaasToken } = require('../utils/jaasToken')
+const { canJoinClassroom } = require('../utils/classroomAccess')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -18,7 +19,7 @@ router.post('/room', requireAuth, async (req, res) => {
   try {
     const { data: session, error: sessionError } = await supabase
       .from('class_sessions')
-      .select('id, classes(teacher_id, title)')
+      .select('id, session_date, classes(teacher_id, title, duration_minutes)')
       .eq('id', class_session_id)
       .single()
 
@@ -38,6 +39,18 @@ router.post('/room', requireAuth, async (req, res) => {
 
     if (!isTeacher && !isEnrolled) {
       return res.status(403).json({ error: 'You are not part of this class' })
+    }
+
+    // Checked here rather than only in the UI: the token is the only way into
+    // the room, so refusing to mint one is what actually keeps a student out
+    // of an empty classroom — hiding the dashboard link does not.
+    const window = canJoinClassroom({
+      sessionDate: session.session_date,
+      durationMinutes: session.classes.duration_minutes,
+      isTeacher
+    })
+    if (!window.ok) {
+      return res.status(403).json({ error: window.error, opens_at: window.opensAt || null })
     }
 
     const { data: user } = await supabase
