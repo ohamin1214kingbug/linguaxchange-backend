@@ -25,15 +25,39 @@ const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 const PHONE_VERIFIED_TOKEN_TTL = '15m'
 // Enough to attend a few classes before a new user hits 0 and needs to
 // teach (or buy, once that exists) to keep participating.
+// Shared with the register form's pickers. 'Native' is offered there and is
+// not a CEFR level, so it is listed explicitly rather than derived.
+const LANGUAGES = ['KO', 'ES', 'DE', 'EN', 'PT', 'FR', 'IT']
+const TEACH_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'Native']
+
 const SIGNUP_CREDIT_GRANT = 3
 
 // POST /api/auth/register
 router.post('/register', registerLimiter, async (req, res) => {
-  const { email, password, first_name, last_name, nationality, phone_number, verified_token } = req.body
+  const {
+    email, password, first_name, last_name, nationality, phone_number, verified_token,
+    bio, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation,
+  } = req.body
 
   if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email' })
   if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' })
   if (!first_name || !last_name) return res.status(400).json({ error: 'First and last name are required' })
+
+  // The form has always collected these and the insert below has always
+  // dropped them, so five fields were thrown away at the one moment a new
+  // member is most willing to answer: what they can teach. Four of the first
+  // five accounts ended up with no native language at all, which is the same
+  // thing as having no supply — every teaching path on this site keys on it.
+  //
+  // Required now, not optional. Someone who cannot say what they speak cannot
+  // teach, and a marketplace of learners with no teachers has nothing to sell.
+  if (!LANGUAGES.includes(String(teach_language || '').toUpperCase())) {
+    return res.status(400).json({ error: 'Pick the language you speak natively' })
+  }
+  const level = String(teach_level || '')
+  if (!TEACH_LEVELS.includes(level)) {
+    return res.status(400).json({ error: 'Pick your level in that language' })
+  }
 
   // Require proof of the phone-verification step (see /send-otp, /verify-otp)
   // rather than trusting a client-supplied "verified" flag directly.
@@ -58,7 +82,17 @@ router.post('/register', registerLimiter, async (req, res) => {
 
     const { data: newUser, error } = await supabase
       .from('users')
-      .insert([{ email, password_hash, first_name, last_name, nationality, phone_number, phone_verified: true }])
+      .insert([{
+        email, password_hash, first_name, last_name, nationality,
+        phone_number, phone_verified: true,
+        // Everything the form already asked for, finally kept.
+        bio: bio || null,
+        teach_language: String(teach_language).toUpperCase(),
+        teach_level: level,
+        learn_languages: Array.isArray(learn_languages) ? learn_languages : [],
+        has_certificate: typeof has_certificate === 'boolean' ? has_certificate : null,
+        certificate_explanation: certificate_explanation || null,
+      }])
       .select('id, email, first_name')
       .single()
 
@@ -156,7 +190,10 @@ router.get('/me', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, first_name, phone_verified, university_domain, university_verified_at, deleted_at')
+      // teach_language is here so the navbar can tell a member their profile
+      // is incomplete. It is already public on GET /api/users/:id, so this
+      // exposes nothing new — it just saves a second request to find out.
+      .select('id, email, first_name, phone_verified, teach_language, university_domain, university_verified_at, deleted_at')
       .eq('id', req.userId)
       .single()
     if (error || !data || data.deleted_at) return res.status(404).json({ error: 'User not found' })
