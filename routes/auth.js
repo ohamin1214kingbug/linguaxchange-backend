@@ -190,15 +190,28 @@ router.get('/me', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('users')
-      // teach_language is here so the navbar can tell a member their profile
-      // is incomplete. It is already public on GET /api/users/:id, so this
-      // exposes nothing new — it just saves a second request to find out.
-      .select('id, email, first_name, phone_verified, teach_language, university_domain, university_verified_at, deleted_at')
+      // teach_language and bio are read to derive profile_incomplete below.
+      // Both are already public on GET /api/users/:id, so this exposes
+      // nothing new — it just saves a second request to find out.
+      .select('id, email, first_name, phone_verified, teach_language, bio, university_domain, university_verified_at, deleted_at')
       .eq('id', req.userId)
       .single()
     if (error || !data || data.deleted_at) return res.status(404).json({ error: 'User not found' })
-    const { deleted_at, ...me } = data
-    res.json(me)
+
+    // Derived rather than returning the fields themselves. The navbar calls
+    // this on every page load to answer a yes/no question, and shipping a
+    // paragraph of bio prose each time to answer it is waste.
+    //
+    // A Google sign-up never sees the registration form — its row is created
+    // with an email, a name and a google_id — so it arrives with neither a
+    // native language nor a bio. Nothing in the app asked for them afterwards,
+    // which is how four of the first five accounts ended up unable to teach.
+    const { deleted_at, bio, teach_language, ...rest } = data
+    res.json({
+      ...rest,
+      teach_language,
+      profile_incomplete: !teach_language || !bio,
+    })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not fetch your account' })
