@@ -6,6 +6,7 @@ const { recordWeeklyActivity } = require('../utils/streak')
 const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 const { fail } = require('../utils/failure')
 const { sendEmail } = require('../utils/mailer')
+const { deleteAccount } = require('../utils/deleteAccount')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -197,6 +198,40 @@ router.post('/users/:id/unsuspend', async (req, res) => {
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not lift the suspension' })
+  }
+})
+
+// POST /api/admin/users/:id/delete
+// Runs the same sequence a member's own deletion runs, so a deleted
+// teacher's students still get their classes cancelled and their credits
+// refunded. Irreversible, and it sits inches from Suspend, which is not —
+// so it takes the user's own code typed back rather than a single click.
+router.post('/users/:id/delete', async (req, res) => {
+  const userId = parseInt(req.params.id)
+  if (!userId) return res.status(400).json({ error: 'Invalid user id' })
+
+  const expected = 'U' + String(userId).padStart(6, '0')
+  if (req.body.confirm !== expected) {
+    return res.status(400).json({ error: `Type ${expected} to confirm` })
+  }
+
+  try {
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, email, first_name, deleted_at')
+      .eq('id', userId)
+      .single()
+
+    if (!user) return res.status(404).json({ error: 'User not found' })
+    if (user.deleted_at) return res.status(400).json({ error: 'That account is already deleted' })
+
+    const result = await deleteAccount(supabase, user)
+    if (!result.ok) return fail(res, 500, 'Could not delete this account', result.error)
+
+    res.json({ deleted: userId })
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not delete this account' })
   }
 })
 
