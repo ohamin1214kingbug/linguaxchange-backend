@@ -16,7 +16,7 @@ const mockFrom = jest.fn()
 // tests override mockFrom per-call with chain() instead of using this default.
 function defaultFromImpl() {
   return {
-    select: () => ({ eq: () => ({ eq: () => ({ gte: (...args) => mockGte(...args) }) }) }),
+    select: () => ({ eq: () => ({ gte: (...args) => mockGte(...args) }) }),
     insert: (...args) => mockInsert(...args),
   }
 }
@@ -107,6 +107,25 @@ describe('countFeedbackEarnings', () => {
   test('treats a null count as zero', async () => {
     mockGte.mockResolvedValueOnce({ count: null, error: null })
     await expect(countFeedbackEarnings(1, new Date())).resolves.toBe(0)
+  })
+
+  // FINDING 1 (final review): the count must come from feedback WRITTEN, not
+  // credits RELEASED. Counting credit_transactions made the cap unenforceable
+  // — payout happens up to AUTO_RELEASE_HOURS after submission, so a reviewer
+  // answering ten in one sitting saw 0 at every gate check.
+  test('counts feedback written by the reviewer, not credits already released', async () => {
+    mockGte.mockResolvedValueOnce({ count: 0, error: null })
+    await countFeedbackEarnings(7, new Date())
+    expect(mockFrom).toHaveBeenCalledWith('assignment_feedback')
+    expect(mockFrom).not.toHaveBeenCalledWith('credit_transactions')
+  })
+
+  test('a reviewer with 3 unreleased submissions this week is refused a 4th', async () => {
+    // Not one of these has been acknowledged, so credit_transactions holds
+    // nothing at all — the old source would have returned 0 and waved it through.
+    mockGte.mockResolvedValueOnce({ count: WEEKLY_FEEDBACK_CAP, error: null })
+    const written = await countFeedbackEarnings(7, new Date())
+    expect(isOverCap(written)).toBe(true)
   })
 
   // FINDING 2: this is the fail-closed branch. A regression that flips it to

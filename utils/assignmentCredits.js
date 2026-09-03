@@ -6,12 +6,10 @@ function db() {
   return client
 }
 
-// Its own transaction type, not 'earned'. Two consequences, both deliberate:
-// the cap below is an exact count of typed rows rather than a string match on
-// a description, and creditSpendGate.hasEverTaught keeps counting only
-// 'earned' — so reviewing paragraphs does not exempt anyone from the
-// anti-freeloading gate. Reusing 'earned' would have granted that exemption
-// by accident.
+// Its own transaction type, not 'earned', so creditSpendGate.hasEverTaught
+// keeps counting only 'earned' — reviewing paragraphs does not exempt anyone
+// from the anti-freeloading gate. Reusing 'earned' would have granted that
+// exemption by accident.
 const FEEDBACK_TYPE = 'earned_feedback'
 
 // One banana buys a 60-minute class or roughly ten minutes of annotation.
@@ -30,14 +28,19 @@ function windowStart(now = new Date()) {
   return new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000)
 }
 
+// Counts feedback WRITTEN in the window, not credits released for it. The
+// payout happens at acknowledgement or up to AUTO_RELEASE_HOURS later, so
+// counting credit_transactions rows meant a reviewer who answered ten
+// requests in one sitting saw a count of 0 at every gate check and all ten
+// paid out — the cap capped nothing. The spec's unit is the review.
+//
 // Fails closed: a lookup error refuses the earning rather than granting it,
 // because the failure mode of the opposite is an uncapped currency.
 async function countFeedbackEarnings(userId, since = windowStart()) {
   const { count, error } = await db()
-    .from('credit_transactions')
+    .from('assignment_feedback')
     .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .eq('type', FEEDBACK_TYPE)
+    .eq('reviewer_id', userId)
     .gte('created_at', since.toISOString())
 
   if (error) {
@@ -52,12 +55,12 @@ async function countFeedbackEarnings(userId, since = windowStart()) {
 //
 // The add_credit payout and the credit_transactions row are two separate
 // writes with no shared transaction, so they can diverge. If the insert
-// fails silently after a successful payout, countFeedbackEarnings — which
-// counts exactly these rows — never sees it: an uncapped currency, paid out
-// for free forever. (This is FINDING 1 from the task-4 review: the column
-// that made every 'earned_feedback' insert fail has since been widened, see
-// migrations/add_assignment_feedback.sql, but the code must not trust the
-// insert regardless.)
+// fails silently after a successful payout the banana is real but has no
+// audit row, so nothing downstream — reconciliation, a support question,
+// the user's own history — can account for it. (This is FINDING 1 from the
+// task-4 review: the column that made every 'earned_feedback' insert fail
+// has since been widened, see migrations/add_assignment_feedback.sql, but
+// the code must not trust the insert regardless.)
 //
 // So the insert's error is checked, and on failure the payout is reversed
 // via spend_credit — the only other atomic credit RPC available — rather
