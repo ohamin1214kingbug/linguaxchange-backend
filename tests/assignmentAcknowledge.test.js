@@ -78,6 +78,10 @@ describe('POST /:id/acknowledge', () => {
   // success, and the row must not be left marked released with no pay — the
   // route clears credit_released_at back to null on this same row so a retry
   // (another click, or the cron sweep) can claim and pay it again.
+  //
+  // FINDING 2 (final review): acknowledged_at must be cleared with it. The UI
+  // renders the acknowledge button on !feedback.acknowledged_at, so leaving it
+  // set removes the very button the retry depends on.
   test('a retryable failure is not reported as success, and the claim is cleared for a retry', async () => {
     mockFrom.mockReturnValueOnce(chain({ data: { id: 5, student_id: 1 }, error: null })) // find the request
     mockFrom.mockReturnValueOnce(chain({ data: [{ id: 9, reviewer_id: 2 }], error: null })) // claim
@@ -89,7 +93,7 @@ describe('POST /:id/acknowledge', () => {
 
     expect(res.statusCode).toBe(500)
     expect(res.body.success).toBe(false)
-    expect(clearBuilder.update).toHaveBeenCalledWith({ credit_released_at: null })
+    expect(clearBuilder.update).toHaveBeenCalledWith({ acknowledged_at: null, credit_released_at: null })
     expect(clearBuilder.eq).toHaveBeenCalledWith('id', 9)
   })
 

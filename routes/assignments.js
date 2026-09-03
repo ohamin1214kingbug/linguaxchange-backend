@@ -268,18 +268,22 @@ router.post('/:id/acknowledge', requireAuth, async (req, res) => {
 
     const payout = await releaseFeedbackCredit(released[0].reviewer_id)
     if (!payout.ok) {
-      // The claim above already flipped credit_released_at. A retryable
-      // failure must not leave that standing, or the row is stuck "released"
-      // with no pay and no retry — clearing it means a second click, or the
-      // cron sweep once AUTO_RELEASE_HOURS has passed, will claim and pay
-      // this row again. A non-retryable failure (the credit was granted and
-      // could not be reversed, see releaseFeedbackCredit) must NOT be
-      // cleared — retrying would pay the reviewer a second time, so the
-      // claim is left standing on purpose and the desync is logged loudly.
+      // The claim above already flipped credit_released_at AND acknowledged_at.
+      // A retryable failure must not leave either standing: credit_released_at
+      // would leave the row stuck "released" with no pay and no retry, and
+      // acknowledged_at would hide the button that triggers the retry —
+      // FeedbackView renders it on !feedback.acknowledged_at, so leaving it
+      // set means only the cron can rescue the reviewer, up to
+      // AUTO_RELEASE_HOURS later. Clearing both means a second click really
+      // can claim and pay this row again, which is what the retry path
+      // assumes. A non-retryable failure (the credit was granted and could
+      // not be reversed, see releaseFeedbackCredit) must NOT be cleared —
+      // retrying would pay the reviewer a second time, so the claim is left
+      // standing on purpose and the desync is logged loudly.
       if (payout.retryable) {
         const { error: clearError } = await supabase
           .from('assignment_feedback')
-          .update({ credit_released_at: null })
+          .update({ acknowledged_at: null, credit_released_at: null })
           .eq('id', released[0].id)
         if (clearError) {
           console.error(
