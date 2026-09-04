@@ -171,7 +171,7 @@ router.post('/users/:id/suspend', async (req, res) => {
     // Only inside the window: a class after the suspension ends is one the
     // teacher will be back for, and cancelling it would punish the students
     // for something already handled.
-    const classes = await cancelTeacherClasses(supabase, userId, { before: endsAt })
+    const classes = await cancelTeacherClasses(supabase, userId, { before: endsAt, byPlatform: true })
 
     // Someone locked out with no explanation files a support request, and
     // answering that by hand is worse than sending the mail.

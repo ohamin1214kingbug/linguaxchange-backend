@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('./mailer')
+const { cancellationNotice } = require('./cancellationNotice')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -23,7 +24,7 @@ function hasFutureSession(sessions, now = new Date()) {
 //
 // No waitlist cascade here — there's no waitlist feature anywhere in this
 // codebase to cascade to.
-async function cancelClass(classId, cls) {
+async function cancelClass(classId, cls, { byPlatform = false } = {}) {
   if (cls.status === 'cancelled') {
     return { alreadyCancelled: true, refundedCount: 0 }
   }
@@ -93,7 +94,11 @@ async function cancelClass(classId, cls) {
         await sendEmail({
           to: enrollment.users?.email,
           subject: `'${cls.title}' has been cancelled`,
-          text: `Hi ${enrollment.users?.first_name || ''}, the class '${cls.title}' has been cancelled by the teacher. Your credit has been refunded.`
+          text: cancellationNotice({
+            title: cls.title,
+            firstName: enrollment.users?.first_name,
+            byPlatform
+          })
         })
 
         refundedCount++
@@ -118,7 +123,7 @@ async function cancelClass(classId, cls) {
 // window. One class in this database is recurring and the rest are one-time,
 // so the difference is currently theoretical; if recurring classes become
 // common, cancel per session instead of per class.
-async function cancelTeacherClasses(supabase, teacherId, { before } = {}) {
+async function cancelTeacherClasses(supabase, teacherId, { before, byPlatform = false } = {}) {
   const { data: classes } = await supabase
     .from('classes')
     .select('id, status, class_sessions(id, session_date, status)')
@@ -139,7 +144,7 @@ async function cancelTeacherClasses(supabase, teacherId, { before } = {}) {
     if (!affected) continue
 
     try {
-      const result = await cancelClass(cls.id, cls)
+      const result = await cancelClass(cls.id, cls, { byPlatform })
       if (!result.alreadyCancelled) {
         cancelled++
         refunded += result.refundedCount
