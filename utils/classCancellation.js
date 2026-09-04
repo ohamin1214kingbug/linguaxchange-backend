@@ -74,6 +74,22 @@ async function cancelClass(classId, cls) {
             related_class_id: classId
           }])
 
+        // Marked, not deleted. A student who cancels for themselves has
+        // their row removed — they chose to leave. This student did not:
+        // they hold a "Class cancelled" credit transaction that points at a
+        // class, so the enrolment has to survive for that to make sense.
+        //
+        // Marked per enrolment after its own refund lands, rather than in
+        // one sweep afterwards: a refund that throws leaves its row
+        // 'confirmed', so a re-run picks it up. It also tightens the guard
+        // this loop already relies on — the select above only takes
+        // 'confirmed' rows, so a refunded student can no longer be paid a
+        // second time even if the class status check is ever bypassed.
+        await supabase
+          .from('class_enrollments')
+          .update({ status: 'cancelled' })
+          .eq('id', enrollment.id)
+
         await sendEmail({
           to: enrollment.users?.email,
           subject: `'${cls.title}' has been cancelled`,
