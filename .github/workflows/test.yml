@@ -25,9 +25,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Matches Railway. Keep this in step with engines in package.json
+          # Matches Railway and Vercel. Keep this in step with engines in package.json
           # and .nvmrc when production moves.
-          node-version: '22'
+          node-version: '24'
           cache: npm
 
       - run: npm ci
