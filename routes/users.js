@@ -45,9 +45,16 @@ router.get('/search', requireAuth, publicGetLimiter, async (req, res) => {
   try {
     let query = supabase.from('users').select(SEARCH_FIELDS).is('deleted_at', null)
 
-    query = parsed.id
-      ? query.eq('id', parsed.id)
-      : query.or(`first_name.ilike.%${parsed.term}%,last_name.ilike.%${parsed.term}%`)
+    if (parsed.id) {
+      query = query.eq('id', parsed.id)
+    } else {
+      // One .or() per word, and PostgREST ANDs separate filters — so
+      // "Hamin Oh" becomes (first~Hamin or last~Hamin) AND (first~Oh or
+      // last~Oh), which is what makes a full name match a split column.
+      for (const term of parsed.terms) {
+        query = query.or(`first_name.ilike.%${term}%,last_name.ilike.%${term}%`)
+      }
+    }
 
     const { data, error } = await query.limit(MAX_RESULTS)
     if (error) return fail(res, 400, 'Could not search', error)
