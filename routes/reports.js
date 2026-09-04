@@ -5,6 +5,7 @@ const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { STATUSES, validateReport } = require('../utils/reports')
 const { fail } = require('../utils/failure')
 const { decodeImage, MAX_EVIDENCE } = require('../utils/imageUpload')
+const { decodePdf } = require('../utils/pdfUpload')
 
 const EVIDENCE_BUCKET = 'report-evidence'
 
@@ -33,11 +34,17 @@ router.post('/', requireAuth, async (req, res) => {
     // Decode before inserting the row. A rejected image after the insert
     // would leave a report standing whose evidence the reporter thinks they
     // attached.
+    // Screenshots and PDFs both count as evidence: a chat log is a picture,
+    // a transcript or an exported thread is a document. Each decoder checks
+    // its own magic bytes, so neither trusts the declared content type.
     const decodedEvidence = []
     for (const dataUrl of evidence) {
-      const decoded = decodeImage(dataUrl)
+      const asPdf = /^data:application\/pdf;base64,/.test(dataUrl || '')
+      const decoded = asPdf ? decodePdf(dataUrl) : decodeImage(dataUrl)
       if (!decoded.ok) return res.status(400).json({ error: decoded.error })
-      decodedEvidence.push(decoded)
+      decodedEvidence.push(asPdf
+        ? { ...decoded, ext: 'pdf', mime: 'application/pdf' }
+        : decoded)
     }
 
     // One open report per reporter per target. The cheapest defence against

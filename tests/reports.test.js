@@ -66,3 +66,35 @@ describe('validateReport', () => {
     })
   })
 })
+
+describe('userIdFromCode', () => {
+  const { userIdFromCode } = require('../utils/reports')
+
+  test('reads the code a member sees on their own profile', () => {
+    expect(userIdFromCode('U000012')).toBe(12)
+  })
+
+  test('tolerates lowercase and surrounding space, which is how it gets pasted', () => {
+    expect(userIdFromCode('  u000007 ')).toBe(7)
+  })
+
+  test('handles an id past six digits', () => {
+    expect(userIdFromCode('U1234567')).toBe(1234567)
+  })
+
+  test('rejects anything that is not a code', () => {
+    for (const bad of ['', null, undefined, '12', 'U', 'UABCDEF', 'U000000', 'U-1', 'hamin']) {
+      expect(userIdFromCode(bad)).toBeNull()
+    }
+  })
+
+  test('validateReport accepts a code in place of an id', () => {
+    const r = validateReport({ report_type: 'user', reported_code: 'U000012', reason: 'x', category: 'harassment' })
+    expect(r.ok).toBe(true)
+    expect(r.reported_id).toBe(12)
+  })
+
+  test('a malformed code is refused rather than silently becoming NaN', () => {
+    expect(validateReport({ report_type: 'user', reported_code: 'nope', reason: 'x' }).ok).toBe(false)
+  })
+})
