@@ -9,6 +9,7 @@ const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { fail } = require('../utils/failure')
 const { decodeImage } = require('../utils/imageUpload')
+const { parseUserQuery, MAX_RESULTS } = require('../utils/userSearch')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
 // owner-only responses add it. notification_preferences and the teaching
@@ -22,6 +23,42 @@ const supabase = createClient(
 )
 
 // GET /api/users/:id
+// GET /api/users/search?q= — find one person by name or by their code.
+//
+// Declared above /:id, which would otherwise swallow "search" as an id.
+//
+// Signed-in only, unlike the profile it links to. The profiles themselves
+// are already public, so this exposes no new kind of data — what it changes
+// is enumeration: with an id you look up one person, with a name you could
+// harvest the list. Behind an account, that stays costly and attributable
+// to someone who can be suspended.
+//
+// Returns what a result row needs and nothing more. The code is included
+// because finding someone by name is how you get the code you then paste
+// into a report.
+const SEARCH_FIELDS = 'id, first_name, last_name, photo_url, nationality, teach_language, teach_level'
+
+router.get('/search', requireAuth, publicGetLimiter, async (req, res) => {
+  const parsed = parseUserQuery(req.query.q)
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error })
+
+  try {
+    let query = supabase.from('users').select(SEARCH_FIELDS).is('deleted_at', null)
+
+    query = parsed.id
+      ? query.eq('id', parsed.id)
+      : query.or(`first_name.ilike.%${parsed.term}%,last_name.ilike.%${parsed.term}%`)
+
+    const { data, error } = await query.limit(MAX_RESULTS)
+    if (error) return fail(res, 400, 'Could not search', error)
+
+    res.json(data || [])
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not search' })
+  }
+})
+
 router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
