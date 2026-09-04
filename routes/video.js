@@ -19,7 +19,7 @@ router.post('/room', requireAuth, async (req, res) => {
   try {
     const { data: session, error: sessionError } = await supabase
       .from('class_sessions')
-      .select('id, session_date, classes(teacher_id, title, duration_minutes)')
+      .select('id, session_date, classes(id, teacher_id, title, duration_minutes)')
       .eq('id', class_session_id)
       .single()
 
@@ -65,6 +65,33 @@ router.post('/room', requireAuth, async (req, res) => {
       return res.status(500).json({ error: 'Video is not configured' })
     }
 
+    // Who else is in this room, so someone can be reported from inside the
+    // call rather than having to leave it, find a profile page and describe
+    // the incident from memory afterwards.
+    //
+    // Nothing new is exposed: the class detail page already lists the
+    // teacher and every enrolled student by name to anyone who can see the
+    // class. Names only — no emails, no ids beyond the one already needed to
+    // link to a profile.
+    const { data: enrolled } = await supabase
+      .from('class_enrollments')
+      .select('user_id, users(id, first_name, last_name)')
+      .eq('class_session_id', class_session_id)
+
+    const { data: teacher } = await supabase
+      .from('users')
+      .select('id, first_name, last_name')
+      .eq('id', session.classes.teacher_id)
+      .single()
+
+    const participants = [
+      ...(teacher ? [{ ...teacher, role: 'teacher' }] : []),
+      ...(enrolled || [])
+        .map(e => e.users)
+        .filter(Boolean)
+        .map(u => ({ ...u, role: 'student' }))
+    ].filter(p => p.id !== req.userId)
+
     const room = buildRoomName(class_session_id, process.env.JWT_SECRET)
     const displayName = `${user?.first_name || 'User'} ${user?.last_name || ''}`.trim()
 
@@ -84,7 +111,8 @@ router.post('/room', requireAuth, async (req, res) => {
       }),
       displayName,
       topic: session.classes.title,
-      isTeacher
+      isTeacher,
+      participants
     })
   } catch (e) {
     console.error(e)
