@@ -19,6 +19,7 @@ const supabase = createClient(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { fail } = require('../utils/failure')
+const { isSuspended } = require('../utils/suspension')
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 // Long enough to finish the rest of the registration form after verifying,
 // short enough that a leaked token can't be replayed much later.
@@ -302,6 +303,19 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ error: INVALID })
     }
 
+    // Refuse at the door. requireAuth blocks every route a suspended account
+    // could reach, so letting the sign-in itself succeed only produced a
+    // working session that failed on its very next request — with no
+    // explanation, because the credentials really were correct.
+    const suspension = isSuspended({ suspendedUntil: user.suspended_until })
+    if (suspension.suspended) {
+      return res.status(403).json({
+        error: 'Your account is suspended',
+        suspended_until: suspension.until.toISOString(),
+        reason: user.suspension_reason || null
+      })
+    }
+
     const token = jwt.sign(
       { userId: user.id },
       process.env.JWT_SECRET,
@@ -342,9 +356,23 @@ router.post('/google-login', async (req, res) => {
     // Check if user already exists
     const { data: existing } = await supabase
       .from('users')
-      .select('id, email, first_name, is_approved, phone_verified')
+      .select('id, email, first_name, is_approved, phone_verified, suspended_until, suspension_reason')
       .eq('email', email)
       .maybeSingle()
+
+    // Same refusal as the password path. A suspended member who signs in
+    // with Google would otherwise get a token that fails on every request.
+    // Checked before the new-user branch, which cannot be suspended.
+    if (existing) {
+      const suspension = isSuspended({ suspendedUntil: existing.suspended_until })
+      if (suspension.suspended) {
+        return res.status(403).json({
+          error: 'Your account is suspended',
+          suspended_until: suspension.until.toISOString(),
+          reason: existing.suspension_reason || null
+        })
+      }
+    }
 
     let user = existing
     const isNewUser = !existing
