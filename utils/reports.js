@@ -12,13 +12,31 @@ const MAX_REASON = 500
 // bury one harassment report.
 const CATEGORIES = ['harassment', 'inappropriate_content', 'spam_or_scam', 'no_show', 'other']
 
+// "U000012" is the id a member sees on their own profile. Reports name people
+// by that rather than by a raw row id, because the code is the only handle a
+// member can read off the screen and pass on.
+function userIdFromCode(code) {
+  const match = /^[Uu]0*(\d+)$/.exec(String(code || '').trim())
+  const id = match ? parseInt(match[1]) : NaN
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
 function validateReport(body = {}) {
   if (!REPORT_TYPES.includes(body.report_type)) {
     return { ok: false, error: 'report_type must be user or class' }
   }
 
-  const reportedId = parseInt(body.reported_id)
-  if (!reportedId) return { ok: false, error: 'reported_id is required' }
+  const reportedId = body.reported_code !== undefined && body.reported_code !== ''
+    ? userIdFromCode(body.reported_code)
+    : parseInt(body.reported_id)
+  if (!reportedId) {
+    return {
+      ok: false,
+      error: body.reported_code !== undefined
+        ? 'That is not a valid user code — it looks like U000012'
+        : 'reported_id is required'
+    }
+  }
 
   const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
   if (!reason) return { ok: false, error: 'A reason is required' }
@@ -43,4 +61,4 @@ function validateReport(body = {}) {
   }
 }
 
-module.exports = { REPORT_TYPES, CATEGORIES, STATUSES, MAX_REASON, validateReport }
+module.exports = { REPORT_TYPES, CATEGORIES, STATUSES, MAX_REASON, validateReport, userIdFromCode }
