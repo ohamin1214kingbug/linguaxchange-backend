@@ -66,3 +66,18 @@ describe('parseUserQuery', () => {
     expect(MAX_RESULTS).toBe(20)
   })
 })
+
+describe('FUZZY_THRESHOLD', () => {
+  const { FUZZY_THRESHOLD } = require('../utils/userSearch')
+
+  // A measured value, not a taste: "경후" scores 0.20 against "경훈 박", and
+  // anything at or above that would drop Korean typos while keeping latin
+  // ones. If this is ever raised past 0.20, that asymmetry comes back.
+  test('is low enough to keep short Korean names in reach', () => {
+    expect(FUZZY_THRESHOLD).toBeLessThan(0.2)
+  })
+
+  test('is not zero, which would match everyone', () => {
+    expect(FUZZY_THRESHOLD).toBeGreaterThan(0)
+  })
+})
