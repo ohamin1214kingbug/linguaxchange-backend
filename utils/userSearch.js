@@ -9,6 +9,20 @@ const MIN_QUERY = 2
 // work for it one query at a time.
 const MAX_RESULTS = 20
 
+// How close a name has to be before the fuzzy fallback offers it.
+//
+// Measured, not picked. At 0.25 a mistyped "경후" scored 0.20 against
+// "경훈 박" and was dropped, while the latin equivalents scored 0.38-0.40 —
+// because pg_trgm compares three-character slices and a two-character
+// Korean name barely has any. On a site whose members are mostly Korean,
+// that asymmetry mattered more than the extra loose latin match 0.15 lets
+// through. In a lookup you scan by eye, a missing row is worse than a
+// spare one.
+//
+// Passed explicitly rather than left to the function's own default, so the
+// value lives in the repo instead of only inside the database.
+const FUZZY_THRESHOLD = 0.15
+
 // Four words is a generous full name. Past that it is someone pasting a
 // sentence, and each word costs another filter on the query.
 const MAX_TERMS = 4
@@ -45,4 +59,4 @@ function parseUserQuery(q) {
   return { ok: true, id: null, terms }
 }
 
-module.exports = { parseUserQuery, MIN_QUERY, MAX_RESULTS, MAX_TERMS }
+module.exports = { parseUserQuery, MIN_QUERY, MAX_RESULTS, MAX_TERMS, FUZZY_THRESHOLD }

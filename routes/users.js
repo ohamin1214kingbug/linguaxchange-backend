@@ -9,7 +9,7 @@ const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { fail } = require('../utils/failure')
 const { decodeImage } = require('../utils/imageUpload')
-const { parseUserQuery, MAX_RESULTS } = require('../utils/userSearch')
+const { parseUserQuery, MAX_RESULTS, FUZZY_THRESHOLD } = require('../utils/userSearch')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
 // owner-only responses add it. notification_preferences and the teaching
@@ -72,7 +72,7 @@ router.get('/search', requireAuth, publicGetLimiter, async (req, res) => {
     // the search worked, it just found nobody, which is the honest answer if
     // the migration has not been run yet.
     const { data: fuzzy, error: fuzzyError } = await supabase
-      .rpc('search_users_fuzzy', { p_query: parsed.terms.join(' '), p_limit: MAX_RESULTS })
+      .rpc('search_users_fuzzy', { p_query: parsed.terms.join(' '), p_limit: MAX_RESULTS, p_threshold: FUZZY_THRESHOLD })
 
     if (fuzzyError) {
       console.error('[SEARCH] fuzzy fallback unavailable:', fuzzyError.message)
