@@ -172,6 +172,56 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
   }
 })
 
+// GET /api/reports/reportable — the people this user could plausibly report:
+// teachers whose classes they took, and students who took theirs.
+//
+// Its own endpoint rather than widening GET /api/classes?teacher_id=, which
+// is public and unauthenticated — adding student names there would hand a
+// teacher's whole roster to anyone who asked for it.
+//
+// Names and ids only, and never the caller themselves. Declared before the
+// /:id routes below so "reportable" is not swallowed as a report id.
+router.get('/reportable', requireAuth, async (req, res) => {
+  try {
+    const people = new Map()
+
+    // Teachers of classes I enrolled in.
+    const { data: mine } = await supabase
+      .from('class_enrollments')
+      .select('class_sessions(classes(teacher:users!teacher_id(id, first_name, last_name, deleted_at)))')
+      .eq('user_id', req.userId)
+
+    for (const row of mine || []) {
+      const t = row.class_sessions?.classes?.teacher
+      if (t && !t.deleted_at && t.id !== req.userId) {
+        people.set(t.id, { id: t.id, first_name: t.first_name, last_name: t.last_name, relation: 'taught_me' })
+      }
+    }
+
+    // Students who enrolled in classes I teach.
+    const { data: taught } = await supabase
+      .from('classes')
+      .select('class_sessions(class_enrollments(users(id, first_name, last_name, deleted_at)))')
+      .eq('teacher_id', req.userId)
+
+    for (const cls of taught || []) {
+      for (const session of cls.class_sessions || []) {
+        for (const enrollment of session.class_enrollments || []) {
+          const u = enrollment.users
+          if (u && !u.deleted_at && u.id !== req.userId && !people.has(u.id)) {
+            people.set(u.id, { id: u.id, first_name: u.first_name, last_name: u.last_name, relation: 'learned_from_me' })
+          }
+        }
+      }
+    }
+
+    res.json([...people.values()])
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not load who you can report' })
+  }
+})
+
 // GET /api/reports/:id/evidence/:index — a short-lived signed URL.
 //
 // The bucket is private, so this is the only way to see the file. Signed
