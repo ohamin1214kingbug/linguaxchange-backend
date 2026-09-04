@@ -1,4 +1,4 @@
-const { cancelClass, hasFutureSession } = require('./classCancellation')
+const { cancelTeacherClasses } = require('./classCancellation')
 const { sendEmail } = require('./mailer')
 const { anonymizedFields, OWN_DATA_DELETIONS } = require('./accountDeletion')
 
@@ -26,20 +26,8 @@ const { anonymizedFields, OWN_DATA_DELETIONS } = require('./accountDeletion')
 //    user id, so nulling photo_url alone leaves it fetchable forever.
 // 3. Anonymize last, then use the real address one final time.
 async function deleteAccount(supabase, user, { notify = true } = {}) {
-  const { data: classes } = await supabase
-    .from('classes')
-    .select('id, status, class_sessions(id, session_date, status)')
-    .eq('teacher_id', user.id)
-
-  for (const cls of classes || []) {
-    if (cls.status !== 'cancelled' && hasFutureSession(cls.class_sessions || [])) {
-      try {
-        await cancelClass(cls.id, cls)
-      } catch (e) {
-        console.error('[ACCOUNT_DELETE] Could not cancel class', cls.id, e.message)
-      }
-    }
-  }
+  // No cutoff: this teacher is not coming back, so everything upcoming goes.
+  await cancelTeacherClasses(supabase, user.id)
 
   for (const { table, column } of OWN_DATA_DELETIONS) {
     const { error } = await supabase.from(table).delete().eq(column, user.id)

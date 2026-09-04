@@ -7,6 +7,7 @@ const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudg
 const { fail } = require('../utils/failure')
 const { sendEmail } = require('../utils/mailer')
 const { deleteAccount } = require('../utils/deleteAccount')
+const { cancelTeacherClasses } = require('../utils/classCancellation')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -162,15 +163,25 @@ router.post('/users/:id/suspend', async (req, res) => {
 
     if (error) return fail(res, 400, 'Could not suspend this account', error)
 
+    // A suspended teacher cannot run the classes they are booked for, so the
+    // ones inside the suspension window are cancelled and their students
+    // refunded. Leaving them standing put a class on a student's dashboard
+    // that nobody could turn up to teach.
+    //
+    // Only inside the window: a class after the suspension ends is one the
+    // teacher will be back for, and cancelling it would punish the students
+    // for something already handled.
+    const classes = await cancelTeacherClasses(supabase, userId, { before: endsAt })
+
     // Someone locked out with no explanation files a support request, and
     // answering that by hand is worse than sending the mail.
     await sendEmail({
       to: user.email,
       subject: 'Your LinguaXchange account has been suspended',
-      text: `Hi ${user.first_name},\n\nYour LinguaXchange account has been suspended until ${endsAt.toUTCString()}.\n\nReason: ${String(reason).trim()}\n\nIf you believe this is a mistake, reply to this email.`
+      text: `Hi ${user.first_name},\n\nYour LinguaXchange account has been suspended until ${endsAt.toUTCString()}.\n\nReason: ${String(reason).trim()}\n\n${classes.cancelled ? `${classes.cancelled} of your upcoming class(es) have been cancelled and the students refunded.\n\n` : ''}If you believe this is a mistake, reply to this email.`
     }).catch(e => console.error('[SUSPEND] Notification email failed', e.message))
 
-    res.json(data)
+    res.json({ ...data, classes_cancelled: classes.cancelled, students_refunded: classes.refunded })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not suspend this account' })
