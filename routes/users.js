@@ -10,6 +10,7 @@ const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { fail } = require('../utils/failure')
 const { decodeImage } = require('../utils/imageUpload')
 const { parseUserQuery, MAX_RESULTS, FUZZY_THRESHOLD } = require('../utils/userSearch')
+const { LANGUAGES, TEACH_LEVELS } = require('../utils/profileFields')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
 // owner-only responses add it. notification_preferences and the teaching
@@ -155,6 +156,19 @@ router.patch('/:id', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'You can only edit your own profile' })
   }
   const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format', 'notification_preferences', 'default_class_duration_minutes', 'default_max_students']
+  // Registration checks these and this route did not, so a value set
+  // correctly at signup could be replaced with anything afterwards. That is
+  // how a translated label — "원어민" instead of "Native" — was stored as a
+  // level: the profile form sent whatever text its button showed.
+  if (req.body.teach_level !== undefined && req.body.teach_level !== '' && req.body.teach_level !== null
+      && !TEACH_LEVELS.includes(req.body.teach_level)) {
+    return res.status(400).json({ error: 'That is not a valid teaching level' })
+  }
+  if (req.body.teach_language !== undefined && req.body.teach_language !== '' && req.body.teach_language !== null
+      && !LANGUAGES.includes(req.body.teach_language)) {
+    return res.status(400).json({ error: 'That is not a language we support' })
+  }
+
   const updates = {}
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key]

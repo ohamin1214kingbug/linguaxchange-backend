@@ -28,8 +28,7 @@ const PHONE_VERIFIED_TOKEN_TTL = '15m'
 // teach (or buy, once that exists) to keep participating.
 // Shared with the register form's pickers. 'Native' is offered there and is
 // not a CEFR level, so it is listed explicitly rather than derived.
-const LANGUAGES = ['KO', 'ES', 'DE', 'EN', 'PT', 'FR', 'IT']
-const TEACH_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'Native']
+const { LANGUAGES, TEACH_LEVELS } = require('../utils/profileFields')
 
 const SIGNUP_CREDIT_GRANT = 3
 
