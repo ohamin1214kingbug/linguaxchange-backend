@@ -106,4 +106,50 @@ async function cancelClass(classId, cls) {
   return { alreadyCancelled: false, refundedCount }
 }
 
-module.exports = { hasFutureSession, cancelClass }
+// Cancels a teacher's classes, refunding and notifying every student booked
+// into them. Shared by account deletion (everything upcoming) and suspension
+// (only what falls inside the suspension window).
+//
+// `before` is the cutoff: a class is cancelled when it has a scheduled
+// session between now and then. Omitted means no cutoff, which is deletion's
+// case — the teacher is not coming back.
+//
+// ponytail: cancels the whole class, not just the sessions inside the
+// window. One class in this database is recurring and the rest are one-time,
+// so the difference is currently theoretical; if recurring classes become
+// common, cancel per session instead of per class.
+async function cancelTeacherClasses(supabase, teacherId, { before } = {}) {
+  const { data: classes } = await supabase
+    .from('classes')
+    .select('id, status, class_sessions(id, session_date, status)')
+    .eq('teacher_id', teacherId)
+
+  const now = new Date()
+  let cancelled = 0
+  let refunded = 0
+
+  for (const cls of classes || []) {
+    if (cls.status === 'cancelled') continue
+
+    const affected = (cls.class_sessions || []).some(session => {
+      if (session.status !== 'scheduled') return false
+      const at = new Date(session.session_date)
+      return at > now && (!before || at < before)
+    })
+    if (!affected) continue
+
+    try {
+      const result = await cancelClass(cls.id, cls)
+      if (!result.alreadyCancelled) {
+        cancelled++
+        refunded += result.refundedCount
+      }
+    } catch (e) {
+      console.error('[CANCEL_TEACHER_CLASSES] Could not cancel class', cls.id, e.message)
+    }
+  }
+
+  return { cancelled, refunded }
+}
+
+module.exports = { hasFutureSession, cancelClass, cancelTeacherClasses }
