@@ -59,7 +59,27 @@ router.get('/search', requireAuth, publicGetLimiter, async (req, res) => {
     const { data, error } = await query.limit(MAX_RESULTS)
     if (error) return fail(res, 400, 'Could not search', error)
 
-    res.json(data || [])
+    if (data && data.length) return res.json(data)
+
+    // Nothing matched literally. Fall back to trigram similarity, which
+    // turns "Hamn" into "Hamin" and makes word order stop mattering.
+    //
+    // A fallback rather than the primary search: an exact match that already
+    // works must not start competing with a near-miss for the top row. Only
+    // a dead end gets replaced.
+    //
+    // A missing function is not an error worth failing the request over —
+    // the search worked, it just found nobody, which is the honest answer if
+    // the migration has not been run yet.
+    const { data: fuzzy, error: fuzzyError } = await supabase
+      .rpc('search_users_fuzzy', { p_query: parsed.terms.join(' '), p_limit: MAX_RESULTS })
+
+    if (fuzzyError) {
+      console.error('[SEARCH] fuzzy fallback unavailable:', fuzzyError.message)
+      return res.json([])
+    }
+
+    res.json((fuzzy || []).map(({ score, ...user }) => user))
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not search' })
