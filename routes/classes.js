@@ -231,8 +231,30 @@ router.post('/', requireAuth, async (req, res) => {
   }
 })
 
+// Approving is refused when every session has already happened.
+//
+// The status flip on its own would be invisible: browse filters on
+// hasUpcomingSession, so a class with no future date stays hidden however
+// it is marked. The email is the real problem — it tells the teacher their
+// class "is now live and students can join", which would be false, and it
+// goes to a real address.
+//
+// This is a guard, not a sweep. One class reached that state in two months;
+// a cron to expire them would be machinery for a queue one person reads.
 router.post('/:id/approve', requireAuth, requireAdmin, async (req, res) => {
   try {
+    const { data: existing, error: findError } = await supabase
+      .from('classes')
+      .select('id, class_sessions(session_date, status)')
+      .eq('id', req.params.id)
+      .single()
+    if (findError || !existing) return res.status(404).json({ error: 'Class not found' })
+    if (!hasUpcomingSession(existing)) {
+      return res.status(400).json({
+        error: 'This class has no upcoming session. Ask the teacher to schedule a new date before approving.'
+      })
+    }
+
     const { data: cls, error } = await supabase
       .from('classes')
       .update({ status: 'approved' })

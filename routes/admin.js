@@ -42,7 +42,7 @@ router.get('/classes', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('classes')
-      .select('*, teacher:users!teacher_id(id, first_name, last_name), class_sessions(id, class_enrollments(status, student:users!user_id(id, first_name, last_name)))')
+      .select('*, teacher:users!teacher_id(id, first_name, last_name), class_sessions(id, session_date, status, class_enrollments(status, student:users!user_id(id, first_name, last_name)))')
       .order('created_at', { ascending: false })
     if (error) return fail(res, 400, 'Could not fetch classes', error)
     res.json(data)
