@@ -5,6 +5,7 @@ const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { validateResource } = require('../utils/resources')
 const { decodePdf } = require('../utils/pdfUpload')
 const { fail } = require('../utils/failure')
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -155,13 +156,18 @@ router.post('/:id/pdf', async (req, res) => {
       .upload(path, decoded.buffer, { contentType: 'application/pdf', upsert: true })
     if (uploadError) return fail(res, 400, 'Could not upload the PDF', uploadError)
 
-    const { data: { publicUrl } } = supabase.storage
-      .from(RESOURCES_BUCKET)
-      .getPublicUrl(path)
-
+    // Our own domain, not the storage provider's. next.config.mjs rewrites
+    // /guides/:file to this bucket, so the address a visitor sees, links and
+    // bookmarks builds authority for linguaxchange.com — the guides are the
+    // SEO asset, and pointing them at supabase.co gives that away.
+    //
+    // getPublicUrl is deliberately not used: it returns the supabase.co
+    // address, and storing that is what silently reverted the domain on every
+    // re-upload while the six live rows had been corrected by hand.
+    //
     // Cache-bust: the path is stable across re-uploads, so without this a
     // replaced PDF would keep serving the old cached copy.
-    const versioned = `${publicUrl}?v=${Date.now()}`
+    const versioned = `${FRONTEND_URL}/guides/${path}?v=${Date.now()}`
 
     const { data, error } = await supabase
       .from('resources')
