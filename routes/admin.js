@@ -33,16 +33,11 @@ router.get('/users', async (req, res) => {
   }
 })
 
-// Teacher and enrolled students come back with the class. The admin screen
-// exists to decide whether a class should run, and "who is teaching it and
-// who signed up" is the part of that decision the row alone cannot answer.
-// Enrollments hang off class_sessions, not off the class, so the nesting
-// mirrors routes/classes.js rather than inventing a second shape.
 router.get('/classes', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('classes')
-      .select('*, teacher:users!teacher_id(id, first_name, last_name), class_sessions(id, class_enrollments(status, student:users!user_id(id, first_name, last_name)))')
+      .select('*')
       .order('created_at', { ascending: false })
     if (error) return fail(res, 400, 'Could not fetch classes', error)
     res.json(data)
