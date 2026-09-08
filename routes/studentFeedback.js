@@ -54,7 +54,12 @@ router.get('/session/:sessionId', requireAuth, async (req, res) => {
   }
 })
 
-// POST /api/student-feedback — create or overwrite one student's feedback.
+// POST /api/student-feedback — record one student's feedback, once.
+//
+// Submitted feedback is final. The student can already have read it, and a
+// rating they were shown quietly becoming a different rating is not a
+// correction, it is a rewrite of something they were told. The teacher gets
+// one considered submission instead of a document that drifts.
 router.post('/', requireAuth, async (req, res) => {
   const sessionId = parseInt(req.body.class_session_id)
   const studentId = parseInt(req.body.student_id)
@@ -80,16 +85,33 @@ router.post('/', requireAuth, async (req, res) => {
 
     if (!enrollment) return res.status(400).json({ error: 'That student was not in this class' })
 
+    // The lock lives here, not only in the UI. Hiding the button stops the
+    // form; it does not stop a second POST.
+    const { data: already } = await supabase
+      .from('student_feedback')
+      .select('id')
+      .eq('class_session_id', sessionId)
+      .eq('student_id', studentId)
+      .maybeSingle()
+
+    if (already) {
+      return res.status(409).json({ error: 'Feedback for this student has already been submitted and cannot be changed.' })
+    }
+
+    // insert, not upsert: upsert existed to overwrite, which is the thing
+    // being removed. A row arriving between the check above and this line
+    // hits the unique constraint on (class_session_id, student_id) and fails
+    // rather than overwriting.
     const { data, error } = await supabase
       .from('student_feedback')
-      .upsert([{
+      .insert([{
         class_session_id: sessionId,
         student_id: studentId,
         teacher_id: req.userId,
         ...check.skills,
         comment: check.comment,
         updated_at: new Date().toISOString()
-      }], { onConflict: 'class_session_id,student_id' })
+      }])
       .select()
       .single()
 
