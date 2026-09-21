@@ -182,8 +182,8 @@ router.post('/users/:id/suspend', async (req, res) => {
     // answering that by hand is worse than sending the mail.
     await sendEmail({
       to: user.email,
-      subject: 'Your Gongbuleng account has been suspended',
-      text: `Hi ${user.first_name},\n\nYour Gongbuleng account has been suspended until ${endsAt.toUTCString()}.\n\nReason: ${String(reason).trim()}\n\n${classes.cancelled ? `${classes.cancelled} of your upcoming class(es) have been cancelled and the students refunded.\n\n` : ''}If you believe this is a mistake, reply to this email.`
+      subject: 'Your GongbuLeng account has been suspended',
+      text: `Hi ${user.first_name},\n\nYour GongbuLeng account has been suspended until ${endsAt.toUTCString()}.\n\nReason: ${String(reason).trim()}\n\n${classes.cancelled ? `${classes.cancelled} of your upcoming class(es) have been cancelled and the students refunded.\n\n` : ''}If you believe this is a mistake, reply to this email.`
     }).catch(e => console.error('[SUSPEND] Notification email failed', e.message))
 
     res.json({ ...data, classes_cancelled: classes.cancelled, students_refunded: classes.refunded })
