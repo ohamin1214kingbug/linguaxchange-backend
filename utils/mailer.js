@@ -10,7 +10,7 @@ async function sendEmail({ to, subject, text }) {
   }
   try {
     const { data, error } = await resend.emails.send({
-      from: 'LinguaXchange <notifications@linguaxchange.com>',
+      from: 'Gongbuleng <notifications@gongbuleng.com>',
       to,
       subject,
       text

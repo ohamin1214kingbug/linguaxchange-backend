@@ -57,6 +57,8 @@ app.use(helmet())
 // browser — cors() with no options reflects any origin, which lets any
 // website script requests against this API using a visitor's own browser.
 const ALLOWED_ORIGINS = [
+  'https://gongbuleng.com',
+  'https://www.gongbuleng.com',
   'https://linguaxchange.com',
   'https://www.linguaxchange.com',
   'https://linguaxchange-frontend.vercel.app',

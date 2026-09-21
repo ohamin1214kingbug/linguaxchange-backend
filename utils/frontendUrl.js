@@ -13,4 +13,4 @@
 // One copy, so the next person changing it changes it everywhere.
 // ponytail: hardcoded, move to an env var when a second environment needs
 // its own value.
-module.exports = { FRONTEND_URL: 'https://linguaxchange.com' }
+module.exports = { FRONTEND_URL: 'https://gongbuleng.com' }

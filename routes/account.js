@@ -40,7 +40,7 @@ router.get('/export', requireAuth, async (req, res) => {
 
     const payload = {
       exported_at: new Date().toISOString(),
-      note: 'Everything LinguaXchange holds that is personal to your account. Records involving other people (their reviews, their bookings on your classes) are excluded.',
+      note: 'Everything Gongbuleng holds that is personal to your account. Records involving other people (their reviews, their bookings on your classes) are excluded.',
       profile: profile.data || null,
       credit_balance: credits.data?.balance ?? 0,
       credit_transactions: transactions.data || [],
@@ -53,7 +53,7 @@ router.get('/export', requireAuth, async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'application/json')
-    res.setHeader('Content-Disposition', `attachment; filename="linguaxchange-data-${id}.json"`)
+    res.setHeader('Content-Disposition', `attachment; filename="gongbuleng-data-${id}.json"`)
     res.send(JSON.stringify(payload, null, 2))
   } catch (e) {
     console.error(e)

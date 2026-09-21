@@ -26,8 +26,8 @@ const jwt = require('jsonwebtoken')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
 
-const TEACHER_EMAIL = 'test-teacher@linguaxchange.invalid'
-const STUDENT_EMAIL = 'test-student@linguaxchange.invalid'
+const TEACHER_EMAIL = 'test-teacher@gongbuleng.invalid'
+const STUDENT_EMAIL = 'test-student@gongbuleng.invalid'
 const CLASS_TITLE = '[TEST] fixture class — not real, safe to delete'
 
 const token = userId => jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '2h' })

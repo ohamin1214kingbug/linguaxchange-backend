@@ -86,7 +86,7 @@ router.post('/verify', requireAuth, verifyEmailLimiter, async (req, res) => {
     // outside. A send that did not happen is not a success.
     const sent = await sendEmail({
       to: email,
-      subject: 'Confirm your university email — LinguaXchange',
+      subject: 'Confirm your university email — Gongbuleng',
       text: `Confirm that this address belongs to you: ${FRONTEND_URL}/university/confirm?token=${rawToken}\n\nThis link expires in 24 hours. If you didn't ask for this, you can ignore this email.`
     })
 

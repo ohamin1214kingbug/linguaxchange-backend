@@ -1,4 +1,5 @@
 const { sendEmail } = require('./mailer')
+const { FRONTEND_URL } = require('./frontendUrl')
 
 // Same source of truth requireAdmin/isAdmin use in middleware/auth.js —
 // keeping admin identity in one env var means adding/removing an admin
@@ -16,7 +17,7 @@ async function notifyAdminsOfPendingUser(user) {
       await sendEmail({
         to: adminEmail,
         subject: 'New user waiting for approval',
-        text: `${user.first_name || 'A new user'} (${user.email}) just signed up and is waiting for approval. Review at https://linguaxchange.com/admin`
+        text: `${user.first_name || 'A new user'} (${user.email}) just signed up and is waiting for approval. Review at ${FRONTEND_URL}/admin`
       })
     } catch (e) {
       console.error('[ADMIN_NOTIFY] Failed to notify', adminEmail, e.message)

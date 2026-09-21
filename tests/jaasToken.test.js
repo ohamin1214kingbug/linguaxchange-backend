@@ -13,7 +13,7 @@ const base = {
   appId: 'vpaas-magic-cookie-test',
   kid: 'vpaas-magic-cookie-test/abc123',
   privateKey,
-  room: 'linguaxchange-42-deadbeefdeadbeef',
+  room: 'gongbuleng-42-deadbeefdeadbeef',
   userId: 7,
   displayName: 'Hamin Oh',
   now: 1785000000000

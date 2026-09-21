@@ -158,7 +158,7 @@ router.post('/:id/pdf', async (req, res) => {
 
     // Our own domain, not the storage provider's. next.config.mjs rewrites
     // /guides/:file to this bucket, so the address a visitor sees, links and
-    // bookmarks builds authority for linguaxchange.com — the guides are the
+    // bookmarks builds authority for gongbuleng.com — the guides are the
     // SEO asset, and pointing them at supabase.co gives that away.
     //
     // getPublicUrl is deliberately not used: it returns the supabase.co

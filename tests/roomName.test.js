@@ -8,7 +8,7 @@ describe('buildRoomName', () => {
   })
 
   test('embeds the session id in the room name', () => {
-    expect(buildRoomName(42, 'secret')).toMatch(/^linguaxchange-42-/)
+    expect(buildRoomName(42, 'secret')).toMatch(/^gongbuleng-42-/)
   })
 
   test('is not guessable from the session id alone (different secrets diverge)', () => {
