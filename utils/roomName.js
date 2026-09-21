@@ -9,7 +9,7 @@ function buildRoomName(classSessionId, secret) {
     .digest('hex')
     .slice(0, 16)
 
-  return `linguaxchange-${classSessionId}-${hash}`
+  return `gongbuleng-${classSessionId}-${hash}`
 }
 
 module.exports = { buildRoomName }

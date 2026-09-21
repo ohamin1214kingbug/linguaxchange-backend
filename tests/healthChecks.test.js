@@ -20,7 +20,7 @@ describe('checkEmail', () => {
     process.env.RESEND_API_KEY = 'test-key'
     global.fetch = async () => ({
       ok: true,
-      json: async () => ({ data: [{ name: 'linguaxchange.com', status: 'failed' }] })
+      json: async () => ({ data: [{ name: 'gongbuleng.com', status: 'failed' }] })
     })
 
     const { checkEmail } = loadModule()
@@ -36,7 +36,7 @@ describe('checkEmail', () => {
     process.env.RESEND_API_KEY = 'test-key'
     global.fetch = async () => ({
       ok: true,
-      json: async () => ({ data: [{ name: 'linguaxchange.com', status: 'verified' }] })
+      json: async () => ({ data: [{ name: 'gongbuleng.com', status: 'verified' }] })
     })
 
     const { checkEmail } = loadModule()
@@ -68,7 +68,7 @@ describe('checkEmail', () => {
     let calls = 0
     global.fetch = async () => {
       calls++
-      return { ok: true, json: async () => ({ data: [{ name: 'linguaxchange.com', status: 'verified' }] }) }
+      return { ok: true, json: async () => ({ data: [{ name: 'gongbuleng.com', status: 'verified' }] }) }
     }
 
     const { checkEmail } = loadModule()
@@ -84,7 +84,7 @@ describe('checkEmail', () => {
     let calls = 0
     global.fetch = async () => {
       calls++
-      return { ok: true, json: async () => ({ data: [{ name: 'linguaxchange.com', status: 'verified' }] }) }
+      return { ok: true, json: async () => ({ data: [{ name: 'gongbuleng.com', status: 'verified' }] }) }
     }
 
     const { checkEmail } = loadModule()
@@ -135,7 +135,7 @@ describe('runHealthChecks', () => {
     process.env.SUPABASE_URL = 'https://example.supabase.co'
     global.fetch = async url => {
       if (String(url).includes('resend.com')) {
-        return { ok: true, json: async () => ({ data: [{ name: 'linguaxchange.com', status: 'failed' }] }) }
+        return { ok: true, json: async () => ({ data: [{ name: 'gongbuleng.com', status: 'failed' }] }) }
       }
       return { text: async () => '<html>deleted_client</html>' }
     }

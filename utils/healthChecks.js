@@ -88,9 +88,9 @@ async function checkEmail(now = Date.now()) {
         result = { ok: false, detail: `Resend API returned ${res.status}` }
       } else {
         const { data } = await res.json()
-        const domain = (data || []).find(d => d.name === 'linguaxchange.com')
+        const domain = (data || []).find(d => d.name === 'gongbuleng.com')
         if (!domain) {
-          result = { ok: false, detail: 'linguaxchange.com is not registered with Resend' }
+          result = { ok: false, detail: 'gongbuleng.com is not registered with Resend' }
         } else if (domain.status !== 'verified') {
           // The whole point of this check. Say the status out loud so the
           // alert email explains itself without anyone opening a dashboard.
