@@ -87,9 +87,9 @@ router.get('/:token', publicGetLimiter, async (req, res) => {
     // Attended: exactly what the confirm-attendance flow sets. Not "joined" —
     // joining proves nothing happened.
     const { data: enrollments } = await supabase
-      .from('enrollments')
+      .from('class_enrollments')
       .select('attended, class_sessions(session_date, classes(language_code, level, duration_minutes))')
-      .eq('student_id', user.id)
+      .eq('user_id', user.id)
       .eq('attended', true)
 
     // Taught: the teacher's own sessions that have already finished. Not
