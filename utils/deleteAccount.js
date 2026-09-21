@@ -49,8 +49,8 @@ async function deleteAccount(supabase, user, { notify = true } = {}) {
   if (notify) {
     await sendEmail({
       to: user.email,
-      subject: 'Your Gongbuleng account has been deleted',
-      text: `Hi ${user.first_name},\n\nYour Gongbuleng account has been deleted and your personal details have been removed.\n\nClasses you had scheduled were cancelled and the students enrolled in them were refunded. Records of past classes and credit transactions are kept without your name attached, because other members' history and our financial records depend on them.\n\nIf you didn't request this, reply to this email immediately.`
+      subject: 'Your GongbuLeng account has been deleted',
+      text: `Hi ${user.first_name},\n\nYour GongbuLeng account has been deleted and your personal details have been removed.\n\nClasses you had scheduled were cancelled and the students enrolled in them were refunded. Records of past classes and credit transactions are kept without your name attached, because other members' history and our financial records depend on them.\n\nIf you didn't request this, reply to this email immediately.`
     }).catch(e => console.error('[ACCOUNT_DELETE] Confirmation email failed', e.message))
   }
 

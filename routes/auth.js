@@ -396,8 +396,8 @@ router.post('/google-login', async (req, res) => {
 
       await sendEmail({
         to: email,
-        subject: 'Welcome to Gongbuleng!',
-        text: `Hi ${first_name}, welcome to Gongbuleng! Your account is pending admin approval — we'll notify you once it's ready.`
+        subject: 'Welcome to GongbuLeng!',
+        text: `Hi ${first_name}, welcome to GongbuLeng! Your account is pending admin approval — we'll notify you once it's ready.`
       })
 
       await notifyAdminsOfPendingUser(newUser)
@@ -446,7 +446,7 @@ router.post('/forgot-password', async (req, res) => {
 
     await sendEmail({
       to: email,
-      subject: 'Reset your Gongbuleng password',
+      subject: 'Reset your GongbuLeng password',
       text: `Hi ${user.first_name}, click this link to reset your password: ${FRONTEND_URL}/auth/reset-password?token=${rawToken}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email.`
     })
 

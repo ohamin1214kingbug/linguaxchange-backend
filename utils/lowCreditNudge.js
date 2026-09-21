@@ -78,7 +78,7 @@ async function claimAndSend(userId, balance) {
   await sendEmail({
     to: user.email,
     subject: `You're down to ${balance} credit${balance === 1 ? '' : 's'}`,
-    text: `Hi ${user.first_name || ''}, you're down to ${balance} credit${balance === 1 ? '' : 's'} on Gongbuleng — ${whatItsGoodFor}.\n\nTeach a class to earn more credits: ${FRONTEND_URL}/classes/create`
+    text: `Hi ${user.first_name || ''}, you're down to ${balance} credit${balance === 1 ? '' : 's'} on GongbuLeng — ${whatItsGoodFor}.\n\nTeach a class to earn more credits: ${FRONTEND_URL}/classes/create`
   })
 }
 
