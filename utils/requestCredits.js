@@ -64,11 +64,16 @@ async function chargeForRequest(userId) {
 // the auto-enrolment failed. `description` says which, so the student's
 // transaction history explains where the credit came from.
 async function refundForRequest(userId, description) {
-  // Atomic add. NULL means no credits row to refund into.
-  const { data: balanceAfter } = await supabase
+  // Atomic add. NULL means no credits row to refund into. Logged either way:
+  // several callers (withdraw, failed auto-enrol) carry on regardless, so this
+  // is the one place a refund that never landed can be seen.
+  const { data: balanceAfter, error } = await supabase
     .rpc('add_credit', { p_user_id: userId, p_amount: REQUEST_COST })
 
-  if (balanceAfter === null) return { ok: false }
+  if (error || balanceAfter === null) {
+    console.error('[CREDIT_LEDGER] request refund not applied for user', userId, `(${description})`, error?.message || 'no credits row')
+    return { ok: false }
+  }
 
   await recordCreditTransaction(supabase, {
     user_id: userId,
@@ -104,8 +109,22 @@ async function refundExpiredRequests(now = new Date()) {
 
       if (!claimed || claimed.length === 0) continue // another tick got it
 
-      await refundForRequest(request.student_id, `Request expired unanswered: ${request.topic}`)
-      refunded++
+      // A refund that didn't land must not stay claimed, or it is never
+      // retried and the student silently loses the credit. Un-claim so the
+      // next tick tries again — refundExpiredAssignments' rule.
+      const refund = await refundForRequest(request.student_id, `Request expired unanswered: ${request.topic}`)
+      if (refund.ok) {
+        refunded++
+      } else {
+        const { error: clearError } = await supabase
+          .from('class_requests')
+          .update({ credit_refunded_at: null })
+          .eq('id', request.id)
+        if (clearError) {
+          console.error('[REQUEST_REFUND] could not un-claim request', request.id,
+            '— it is marked refunded with NO refund and will not be retried; needs a manual fix', clearError.message)
+        }
+      }
     }
   } catch (e) {
     console.error('[REQUEST_REFUND] sweep failed', e.message)
