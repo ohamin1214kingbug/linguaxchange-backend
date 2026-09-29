@@ -182,9 +182,12 @@ router.post('/', requireAuth, async (req, res) => {
 router.post('/:id/confirm', requireAuth, async (req, res) => {
   const user_id = req.userId
   try {
+    // The teacher is read here, before the lock below, not after it: once
+    // the lock lands nothing can retry this request, so everything the
+    // payout needs has to be in hand first.
     const { data: existing, error: fetchError } = await supabase
       .from('class_enrollments')
-      .select('id, class_session_id, class_sessions(session_date)')
+      .select('id, class_session_id, class_sessions(session_date, classes(teacher_id))')
       .eq('id', req.params.id)
       .eq('user_id', user_id)
       .single()
@@ -214,34 +217,28 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
     // Student attended a class this week — counts toward their weekly activity streak
     await recordWeeklyActivity(user_id)
 
-    const { data: session } = await supabase
-      .from('class_sessions')
-      .select('class_id')
-      .eq('id', enrollment.class_session_id)
-      .single()
-
-    const { data: cls } = await supabase
-      .from('classes')
-      .select('teacher_id')
-      .eq('id', session.class_id)
-      .single()
+    const teacherId = existing.class_sessions?.classes?.teacher_id
 
     // Atomic grant so concurrent confirms can't lose each other's +1. NULL
     // means the teacher has no credits row to top up — skip the transaction
-    // rather than record an 'earned' row that never moved a balance.
-    const { data: newTeacherBalance } = await supabase
-      .rpc('add_credit', { p_user_id: cls.teacher_id, p_amount: 1 })
+    // rather than record an 'earned' row that never moved a balance. A
+    // payout that doesn't apply can't be retried (the lock above is spent),
+    // so it is logged for a manual top-up rather than dropped silently.
+    const { data: newTeacherBalance, error: payoutError } = await supabase
+      .rpc('add_credit', { p_user_id: teacherId, p_amount: 1 })
 
-    if (newTeacherBalance !== null) {
+    if (payoutError || newTeacherBalance === null) {
+      console.error('[CREDIT_LEDGER] attendance payout not applied for teacher', teacherId, 'enrollment', enrollment.id, payoutError?.message || 'no credits row')
+    } else {
       await recordCreditTransaction(supabase, {
-        user_id: cls.teacher_id,
+        user_id: teacherId,
         amount: 1,
         type: 'earned',
         description: 'Student confirmed attendance'
       })
 
       // Teacher just topped up — clears the low-credit flag if they're back above threshold
-      await resetLowCreditNotificationIfToppedUp(cls.teacher_id, newTeacherBalance)
+      await resetLowCreditNotificationIfToppedUp(teacherId, newTeacherBalance)
     }
 
     res.json({ success: true })
