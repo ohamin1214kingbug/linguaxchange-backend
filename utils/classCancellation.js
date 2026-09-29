@@ -32,14 +32,33 @@ async function cancelClass(classId, cls, { byPlatform = false } = {}) {
 
   const now = new Date()
 
-  const { data: sessions } = await supabase
+  // Every read happens, and is checked, before the first write. These used
+  // to read only `data`, and the booked students were looked up after the
+  // class was already marked cancelled — so a failed read produced a
+  // cancelled class whose students were never refunded or told, silently.
+  // Throwing here leaves the class untouched; both callers turn it into a
+  // retryable failure (a 500 for the teacher, a logged skip for suspension
+  // and deletion).
+  const { data: sessions, error: sessionsError } = await supabase
     .from('class_sessions')
     .select('id, session_date, status')
     .eq('class_id', classId)
+  if (sessionsError) throw new Error(`could not read sessions of class ${classId}: ${sessionsError.message}`)
 
   const futureSessionIds = (sessions || [])
     .filter(s => s.status === 'scheduled' && new Date(s.session_date) > now)
     .map(s => s.id)
+
+  let enrollments = []
+  if (futureSessionIds.length > 0) {
+    const { data, error: enrollmentsError } = await supabase
+      .from('class_enrollments')
+      .select('id, user_id, users(email, first_name)')
+      .in('class_session_id', futureSessionIds)
+      .eq('status', 'confirmed')
+    if (enrollmentsError) throw new Error(`could not read bookings of class ${classId}: ${enrollmentsError.message}`)
+    enrollments = data || []
+  }
 
   await supabase
     .from('classes')
@@ -54,14 +73,8 @@ async function cancelClass(classId, cls, { byPlatform = false } = {}) {
   }
 
   let refundedCount = 0
-  if (futureSessionIds.length > 0) {
-    const { data: enrollments } = await supabase
-      .from('class_enrollments')
-      .select('id, user_id, users(email, first_name)')
-      .in('class_session_id', futureSessionIds)
-      .eq('status', 'confirmed')
-
-    for (const enrollment of enrollments || []) {
+  if (enrollments.length > 0) {
+    for (const enrollment of enrollments) {
       try {
         // supabase-js reports a failed call instead of throwing, so throw it
         // here: the marking below relies on a failed refund leaving this row
@@ -130,10 +143,14 @@ async function cancelClass(classId, cls, { byPlatform = false } = {}) {
 // so the difference is currently theoretical; if recurring classes become
 // common, cancel per session instead of per class.
 async function cancelTeacherClasses(supabase, teacherId, { before, byPlatform = false } = {}) {
-  const { data: classes } = await supabase
+  const { data: classes, error: classesError } = await supabase
     .from('classes')
     .select('id, status, class_sessions(id, session_date, status)')
     .eq('teacher_id', teacherId)
+  // Logged, not thrown: suspension and deletion must still go ahead. But a
+  // teacher whose classes silently stay bookable after being removed is the
+  // outcome to catch, so it has to be visible.
+  if (classesError) console.error('[CANCEL_TEACHER_CLASSES] Could not read classes of teacher', teacherId, classesError.message)
 
   const now = new Date()
   let cancelled = 0

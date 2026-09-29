@@ -28,9 +28,13 @@ const TABLES = {
   classes: { columns: ['teacher_id'], rows: [] },
 }
 
+// Tables a test wants to fail as if the database were briefly unreachable.
+const failing = new Set()
+
 function mockQuery(table) {
   const def = TABLES[table]
   let error = def ? null : { code: 'PGRST205', message: `Could not find the table 'public.${table}'` }
+  if (failing.has(table)) error = { message: 'connection reset' }
   let rows = def ? def.rows : []
   const builder = {
     select: () => builder,
@@ -73,6 +77,22 @@ describe('GET /api/records/:token', () => {
       firstActivity: '2026-09-01T10:00:00.000Z',
       lastActivity: '2026-09-08T10:00:00.000Z',
     })
+  })
+
+  // A record a university office may rely on must never read "0 classes"
+  // because a query failed: that is the silent-zero bug again, caused by a
+  // transient error instead of a typo.
+  test.each(['class_enrollments', 'classes', 'users'])('a failed %s read is a 500, never a record of zeros', async table => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    failing.add(table)
+    try {
+      const res = await get('tok-ana')
+      expect(res.statusCode).toBe(500)
+      expect(res.body.attendedCount).toBeUndefined()
+    } finally {
+      failing.clear()
+      errorSpy.mockRestore()
+    }
   })
 
   test('an unknown token is a flat 404', async () => {

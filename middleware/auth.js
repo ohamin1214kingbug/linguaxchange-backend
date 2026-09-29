@@ -20,11 +20,16 @@ async function requireAuth(req, res, next) {
     // JWTs can't be deleted once issued — logout and password-reset instead
     // bump this per-user cutoff, and any token issued before it is rejected
     // even though it hasn't expired yet.
-    const { data: user } = await supabase
+    const { data: user, error: userError } = await supabase
       .from('users')
       .select('token_valid_after, suspended_until, suspension_reason')
       .eq('id', payload.userId)
       .single()
+
+    // Fail closed. This row carries both the suspension and the revocation
+    // cutoff; without it neither check below can run. Reading only `data`
+    // used to let a failed lookup through as "not suspended, not revoked".
+    if (userError || !user) return res.status(401).json({ error: 'Invalid or expired token' })
 
     // Before the token-revocation check, not after: suspending bumps
     // token_valid_after too, so with the order reversed every suspended
