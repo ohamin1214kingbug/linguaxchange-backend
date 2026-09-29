@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js')
+const { recordCreditTransaction } = require('./creditLedger')
 const { blocksSpend, hasEverTaught } = require('./creditSpendGate')
 const { maybeSendLowCreditNudge, resetLowCreditNotificationIfToppedUp } = require('./lowCreditNudge')
 
@@ -48,12 +49,12 @@ async function chargeForRequest(userId) {
   }
   if (balanceAfter === null) return { ok: false, error: 'Not enough credits' }
 
-  await supabase.from('credit_transactions').insert([{
+  await recordCreditTransaction(supabase, {
     user_id: userId,
     amount: -REQUEST_COST,
     type: 'spent',
     description: 'Posted a class request'
-  }])
+  })
 
   await maybeSendLowCreditNudge(userId, balanceAfter)
   return { ok: true, balance: balanceAfter }
@@ -69,12 +70,12 @@ async function refundForRequest(userId, description) {
 
   if (balanceAfter === null) return { ok: false }
 
-  await supabase.from('credit_transactions').insert([{
+  await recordCreditTransaction(supabase, {
     user_id: userId,
     amount: REQUEST_COST,
     type: 'refunded',
     description
-  }])
+  })
 
   await resetLowCreditNotificationIfToppedUp(userId, balanceAfter)
   return { ok: true, balance: balanceAfter }

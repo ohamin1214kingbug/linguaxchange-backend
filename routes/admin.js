@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { recordCreditTransaction } = require('../utils/creditLedger')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { recordWeeklyActivity } = require('../utils/streak')
 const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
@@ -96,14 +97,12 @@ router.post('/users/:id/credit', async (req, res) => {
     if (error) return fail(res, 400, 'Could not add credit', error)
     if (newBalance === null) return res.status(404).json({ error: 'User not found' })
 
-    await supabase
-      .from('credit_transactions')
-      .insert([{
-        user_id: req.params.id,
-        amount,
-        type: 'earned',
-        description: req.body.description || 'Credit added by admin'
-      }])
+    await recordCreditTransaction(supabase, {
+      user_id: req.params.id,
+      amount,
+      type: 'earned',
+      description: req.body.description || 'Credit added by admin'
+    })
 
     // Same "balance went up" case resetLowCreditNotificationIfToppedUp
     // already covers for teaching/attendance credit — an admin grant that

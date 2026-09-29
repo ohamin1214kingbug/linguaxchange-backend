@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
+const { recordCreditTransaction } = require('../utils/creditLedger')
 const { sendEmail } = require('../utils/mailer')
 const { requireAuth } = require('../middleware/auth')
 const { pickNextUnjoinedSession } = require('../utils/pickSession')
@@ -127,14 +128,12 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Not enough credits' })
     }
 
-    await supabase
-      .from('credit_transactions')
-      .insert([{
-        user_id,
-        amount: -1,
-        type: 'spent',
-        description: 'Joined a class'
-      }])
+    await recordCreditTransaction(supabase, {
+      user_id,
+      amount: -1,
+      type: 'spent',
+      description: 'Joined a class'
+    })
 
     // Credit was just spent (not an admin/refund adjustment) — the right
     // trigger point for the low-credit nudge
@@ -234,14 +233,12 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
       .rpc('add_credit', { p_user_id: cls.teacher_id, p_amount: 1 })
 
     if (newTeacherBalance !== null) {
-      await supabase
-        .from('credit_transactions')
-        .insert([{
-          user_id: cls.teacher_id,
-          amount: 1,
-          type: 'earned',
-          description: 'Student confirmed attendance'
-        }])
+      await recordCreditTransaction(supabase, {
+        user_id: cls.teacher_id,
+        amount: 1,
+        type: 'earned',
+        description: 'Student confirmed attendance'
+      })
 
       // Teacher just topped up — clears the low-credit flag if they're back above threshold
       await resetLowCreditNotificationIfToppedUp(cls.teacher_id, newTeacherBalance)
@@ -294,20 +291,29 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Enrollment not found' })
     }
 
+    // Only a refund that actually moved a balance is recorded or reported,
+    // the same rule as the attendance payout. The add used to go unchecked,
+    // so a failed one still wrote a 'refunded' row and told the student
+    // their credit was back.
+    let refunded = false
     if (refund) {
-      await supabase.rpc('add_credit', { p_user_id: user_id, p_amount: 1 })
+      const { data: refundedBalance, error: refundError } = await supabase
+        .rpc('add_credit', { p_user_id: user_id, p_amount: 1 })
 
-      await supabase
-        .from('credit_transactions')
-        .insert([{
+      if (refundError || refundedBalance === null) {
+        console.error('[CREDIT_LEDGER] cancellation refund not applied for user', user_id, refundError?.message || 'no credits row')
+      } else {
+        refunded = true
+        await recordCreditTransaction(supabase, {
           user_id,
           amount: 1,
           type: 'refunded',
           description: 'Cancelled class 24h+ before start'
-        }])
+        })
+      }
     }
 
-    res.json({ success: true, refunded: refund })
+    res.json({ success: true, refunded })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not cancel enrollment' })
