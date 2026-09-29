@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js')
+const { recordCreditTransaction } = require('./creditLedger')
 const { sendEmail } = require('./mailer')
 const { cancellationNotice } = require('./cancellationNotice')
 
@@ -62,18 +63,23 @@ async function cancelClass(classId, cls, { byPlatform = false } = {}) {
 
     for (const enrollment of enrollments || []) {
       try {
-        await supabase
+        // supabase-js reports a failed call instead of throwing, so throw it
+        // here: the marking below relies on a failed refund leaving this row
+        // 'confirmed' for a re-run. NULL means no credits row to refund into,
+        // so there is nothing to record.
+        const { data: refundedBalance, error: refundError } = await supabase
           .rpc('add_credit', { p_user_id: enrollment.user_id, p_amount: 1 })
+        if (refundError) throw new Error(`add_credit failed: ${refundError.message}`)
 
-        await supabase
-          .from('credit_transactions')
-          .insert([{
+        if (refundedBalance !== null) {
+          await recordCreditTransaction(supabase, {
             user_id: enrollment.user_id,
             amount: 1,
             type: 'refunded',
             description: 'Class cancelled',
             related_class_id: classId
-          }])
+          })
+        }
 
         // Marked, not deleted. A student who cancels for themselves has
         // their row removed — they chose to leave. This student did not:
