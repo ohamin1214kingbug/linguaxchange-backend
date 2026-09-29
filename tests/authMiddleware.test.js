@@ -100,6 +100,36 @@ describe('requireAuth', () => {
     expect(next).not.toHaveBeenCalled()
   })
 
+  // The row is what carries the suspension and the revocation cutoff. Without
+  // it neither check can run, so the request must not go through: this used
+  // to fail open, letting suspended, logged-out and deleted accounts' tokens
+  // in whenever the lookup errored.
+  test('rejects a valid token when the user lookup errors', async () => {
+    mockUserRow = { data: null, error: { message: 'connection reset' } }
+    const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET, { expiresIn: '1h' })
+    const req = { headers: { authorization: `Bearer ${token}` } }
+    const res = mockRes()
+    const next = jest.fn()
+
+    await requireAuth(req, res, next)
+
+    expect(res.status).toHaveBeenCalledWith(401)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  test('rejects a valid token whose user row does not exist', async () => {
+    mockUserRow = { data: null, error: null }
+    const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET, { expiresIn: '1h' })
+    const req = { headers: { authorization: `Bearer ${token}` } }
+    const res = mockRes()
+    const next = jest.fn()
+
+    await requireAuth(req, res, next)
+
+    expect(res.status).toHaveBeenCalledWith(401)
+    expect(next).not.toHaveBeenCalled()
+  })
+
   test('rejects a token signed with a different secret', () => {
     const token = jwt.sign({ userId: 1 }, 'wrong-secret', { expiresIn: '1h' })
     const req = { headers: { authorization: `Bearer ${token}` } }
