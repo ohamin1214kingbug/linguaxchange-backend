@@ -76,29 +76,36 @@ router.delete('/share', requireAuth, async (req, res) => {
 // and a wrong one is a flat 404 with no hint that some other token would work.
 router.get('/:token', publicGetLimiter, async (req, res) => {
   try {
-    const { data: user } = await supabase
+    // Every read below checks its error. This record is handed to people who
+    // cannot see behind it, so a failed query must say so rather than render
+    // as a real record of zero classes — the silent-zero bug of 2026-08-31,
+    // which only surfaced three weeks later.
+    const { data: user, error: userError } = await supabase
       .from('users')
       .select('id, first_name, last_name, university_domain, university_verified_at')
       .eq('record_token', req.params.token)
       .maybeSingle()
 
+    if (userError) return fail(res, 500, 'Could not load the record', userError)
     if (!user) return res.status(404).json({ error: 'Record not found' })
 
     // Attended: exactly what the confirm-attendance flow sets. Not "joined" —
     // joining proves nothing happened.
-    const { data: enrollments } = await supabase
+    const { data: enrollments, error: attendedError } = await supabase
       .from('class_enrollments')
       .select('attended, class_sessions(session_date, classes(language_code, level, duration_minutes))')
       .eq('user_id', user.id)
       .eq('attended', true)
+    if (attendedError) return fail(res, 500, 'Could not load the record', attendedError)
 
     // Taught: the teacher's own sessions that have already finished. Not
     // classes.status = 'completed' — that needs a manual admin action almost
     // nothing triggers, so a record built on it would under-count everyone.
-    const { data: taughtClasses } = await supabase
+    const { data: taughtClasses, error: taughtError } = await supabase
       .from('classes')
       .select('language_code, level, duration_minutes, class_sessions(session_date, status)')
       .eq('teacher_id', user.id)
+    if (taughtError) return fail(res, 500, 'Could not load the record', taughtError)
 
     const now = Date.now()
 
