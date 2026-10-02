@@ -397,7 +397,7 @@ router.post('/google-login', async (req, res) => {
       await sendEmail({
         to: email,
         subject: 'Welcome to GongbuLeng!',
-        text: `Hi ${first_name}, welcome to GongbuLeng! Your account is pending admin approval — we'll notify you once it's ready.`
+        text: `Hi ${first_name}, welcome to GongbuLeng! You can already browse classes and request the one you want. Teaching your own classes opens once your account is approved — we'll email you when it is.`
       })
 
       await notifyAdminsOfPendingUser(newUser)
