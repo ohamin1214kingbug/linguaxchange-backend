@@ -4,6 +4,7 @@ const { sendClassReminders } = require('../utils/classReminder')
 const { sendStartingSoonNotifications, sendLiveNotifications } = require('../utils/inAppNotifications')
 const { refundExpiredRequests } = require('../utils/requestCredits')
 const { releaseDueFeedback, refundExpiredAssignments } = require('../utils/assignmentCredits')
+const { releaseDueAttendancePayouts } = require('../utils/attendancePayout')
 const { runHealthChecks } = require('../utils/healthChecks')
 const { recordRun, REMINDER_JOB } = require('../utils/cronHeartbeat')
 
@@ -33,6 +34,10 @@ async function handleSendReminders(req, res) {
   const { released: feedbackReleased } = await releaseDueFeedback()
   const { refunded: assignmentsRefunded } = await refundExpiredAssignments()
 
+  // And a student who never presses "confirm attendance" shouldn't leave the
+  // teacher unpaid: their banana reaches the teacher 72h after class.
+  const { paid: attendancePaid } = await releaseDueAttendancePayouts()
+
   // Recorded even when this tick sent nothing — that is what makes a silent
   // scheduler distinguishable from a quiet one. Never throws, so a failed
   // heartbeat cannot cost a reminder that already went out.
@@ -40,7 +45,7 @@ async function handleSendReminders(req, res) {
 
   res.json({
     ...summary, startingSoonNotified, liveNotified, requestsRefunded,
-    feedbackReleased, assignmentsRefunded,
+    feedbackReleased, assignmentsRefunded, attendancePaid,
   })
 }
 

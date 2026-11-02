@@ -6,9 +6,10 @@ const { sendEmail } = require('../utils/mailer')
 const { requireAuth } = require('../middleware/auth')
 const { pickNextUnjoinedSession } = require('../utils/pickSession')
 const { recordWeeklyActivity } = require('../utils/streak')
-const { maybeSendLowCreditNudge, resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
+const { maybeSendLowCreditNudge } = require('../utils/lowCreditNudge')
 const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
 const { canConfirmAttendance } = require('../utils/attendanceConfirm')
+const { claimTeacherPayout, payTeacher, releaseClaim } = require('../utils/attendancePayout')
 const { canRefundCancellation } = require('../utils/enrollmentCancel')
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
 const { fail } = require('../utils/failure')
@@ -219,26 +220,20 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
 
     const teacherId = existing.class_sessions?.classes?.teacher_id
 
-    // Atomic grant so concurrent confirms can't lose each other's +1. NULL
-    // means the teacher has no credits row to top up — skip the transaction
-    // rather than record an 'earned' row that never moved a balance. A
-    // payout that doesn't apply can't be retried (the lock above is spent),
-    // so it is logged for a manual top-up rather than dropped silently.
-    const { data: newTeacherBalance, error: payoutError } = await supabase
-      .rpc('add_credit', { p_user_id: teacherId, p_amount: 1 })
-
-    if (payoutError || newTeacherBalance === null) {
-      console.error('[CREDIT_LEDGER] attendance payout not applied for teacher', teacherId, 'enrollment', enrollment.id, payoutError?.message || 'no credits row')
-    } else {
-      await recordCreditTransaction(supabase, {
-        user_id: teacherId,
-        amount: 1,
-        type: 'earned',
-        description: 'Student confirmed attendance'
-      })
-
-      // Teacher just topped up — clears the low-credit flag if they're back above threshold
-      await resetLowCreditNotificationIfToppedUp(teacherId, newTeacherBalance)
+    // The attendance lock above records that the student came; the payout has
+    // its own lock (teacher_paid_at), shared with the automatic payout 72h
+    // after class. If that already paid the teacher, the claim comes back
+    // empty and nothing is paid twice. A payout that doesn't apply is
+    // un-claimed so the automatic sweep retries it.
+    const claim = await claimTeacherPayout(enrollment.id)
+    if (claim.error) {
+      console.error('[CREDIT_LEDGER] attendance payout claim failed for teacher', teacherId, 'enrollment', enrollment.id, claim.error.message)
+    } else if (claim.claimed) {
+      const payout = await payTeacher(teacherId, 'Student confirmed attendance')
+      if (!payout.ok) {
+        console.error('[CREDIT_LEDGER] attendance payout not applied for teacher', teacherId, 'enrollment', enrollment.id, payout.reason, '— the automatic sweep will retry')
+        await releaseClaim(enrollment.id)
+      }
     }
 
     res.json({ success: true })

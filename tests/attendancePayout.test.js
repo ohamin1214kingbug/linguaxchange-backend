@@ -5,16 +5,26 @@
 // lock meant no retry could ever pay the teacher. The teacher now comes from
 // the read that happens before the lock, and a payout that doesn't apply is
 // logged. Driven through router.handle(), as in assignmentAcknowledge.test.js.
+//
+// The payout now has its own lock (teacher_paid_at), shared with the
+// automatic payout 72h after class (utils/attendancePayout.js): a confirm
+// that finds it already claimed pays nothing, and a payout that fails
+// releases the claim so the sweep retries it.
 
 const mockCalls = []
 let mockAddCredit = { data: 4, error: null }
+let mockClaimed = true
 
 function mockBuilder(table) {
   const call = { table, op: 'select' }
   mockCalls.push(call)
   const b = {
     select: () => b,
-    update: () => { call.op = 'update'; return b },
+    update: payload => { call.op = 'update'; call.payload = payload; return b },
+    is: () => b,
+    then: (resolve, reject) => Promise.resolve(
+      call.payload?.teacher_paid_at ? { data: mockClaimed ? [{ id: 5 }] : [], error: null } : { data: null, error: null }
+    ).then(resolve, reject),
     insert: rows => { call.op = 'insert'; call.rows = rows; return Promise.resolve({ error: null }) },
     eq: () => b,
     single: () => Promise.resolve(table === 'class_enrollments'
@@ -51,6 +61,7 @@ let errorSpy
 beforeEach(() => {
   mockCalls.length = 0
   mockAddCredit = { data: 4, error: null }
+  mockClaimed = true
   errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => errorSpy.mockRestore())
@@ -72,5 +83,14 @@ describe('POST /:id/confirm payout', () => {
     expect(res.body).toEqual({ success: true })
     expect(errorSpy.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[CREDIT_LEDGER\].*teacher 3/)
     expect(mockCalls.some(c => c.op === 'insert')).toBe(false)
+    // The claim is released so the automatic sweep can retry the payout.
+    expect(mockCalls).toContainEqual(expect.objectContaining({ table: 'class_enrollments', op: 'update', payload: { teacher_paid_at: null } }))
+  })
+
+  test('pays nothing when the automatic payout already claimed this enrollment', async () => {
+    mockClaimed = false
+    const res = await confirm(5)
+    expect(res.body).toEqual({ success: true })
+    expect(mockCalls.some(c => c.rpc === 'add_credit')).toBe(false)
   })
 })
