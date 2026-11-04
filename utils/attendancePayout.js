@@ -111,7 +111,10 @@ async function releaseDueAttendancePayouts(now = new Date()) {
       }
     }
   } catch (e) {
+    // null, not 0: the cron response must tell "nothing was due" apart from
+    // "the sweep is broken", or a failing query looks like a quiet day.
     console.error('releaseDueAttendancePayouts failed', e)
+    return { paid: null }
   }
   return { paid }
 }
