@@ -8,6 +8,7 @@
 const mockUpdates = []
 const mockRpcs = []
 let mockDue
+let mockDueError
 let mockReports
 let mockClaimed
 let mockAddCredit
@@ -23,7 +24,7 @@ function mockBuilder(table) {
       let result
       if (table === 'reports') result = mockReports
       else if (payload) result = { data: payload.teacher_paid_at && mockClaimed ? [{ id: 1 }] : [], error: null }
-      else result = { data: mockDue, error: null }
+      else result = { data: mockDue, error: mockDueError }
       return Promise.resolve(result).then(resolve, reject)
     },
   }
@@ -47,6 +48,7 @@ beforeEach(() => {
   mockUpdates.length = 0
   mockRpcs.length = 0
   mockDue = [dueRow]
+  mockDueError = null
   mockReports = { data: [], error: null }
   mockClaimed = true
   mockAddCredit = { data: 4, error: null }
@@ -82,4 +84,12 @@ test('a failed payout is logged and un-claimed for the next tick', async () => {
   expect(await releaseDueAttendancePayouts()).toEqual({ paid: 0 })
   expect(mockUpdates).toContainEqual({ table: 'class_enrollments', payload: { teacher_paid_at: null } })
   expect(errorSpy.mock.calls.map(c => c.join(' ')).join('\n')).toMatch(/\[CREDIT_LEDGER\].*teacher 3/)
+})
+
+test('reports null, not 0, when the due query fails', async () => {
+  mockDue = null
+  mockDueError = { message: 'column does not exist' }
+  expect(await releaseDueAttendancePayouts()).toEqual({ paid: null })
+  expect(mockRpcs).toEqual([])
+  expect(errorSpy.mock.calls.map(c => String(c[0])).join('\n')).toMatch(/releaseDueAttendancePayouts failed/)
 })
