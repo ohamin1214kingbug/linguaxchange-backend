@@ -46,10 +46,12 @@ const assignmentRoutes = require('./routes/assignments')
 
 const app = express()
 
-// Railway terminates TLS and proxies requests through a single hop, so trust
-// exactly one layer of X-Forwarded-For — needed for rate limiting (and
-// req.ip generally) to see the real client IP instead of Railway's own.
-app.set('trust proxy', 1)
+// Railway puts two proxies in front of the app: its edge appends the
+// visitor's address and an internal hop appends its own, so a direct request
+// arrives as X-Forwarded-For "visitor, railwayEdge". Trusting only one hop made
+// req.ip a Railway server, and every visitor shared its rate-limit bucket.
+// Counting two from the right also ignores anything a client prepends itself.
+app.set('trust proxy', 2)
 
 app.use(helmet())
 
@@ -131,7 +133,13 @@ const { ipKeyGenerator: debugIpKey } = require('express-rate-limit')
 app.get('/api/_debug/client-key', (req, res) => {
   const clientIpHeader = req.get('x-client-ip') || null
   const rateLimitKey = debugKeyGenerator(req)
+  const givenSecret = req.get('x-proxy-secret')
+  const envSecret = process.env.API_PROXY_SECRET
   res.json({
+    // Yes/no only: neither value nor length leaves the server.
+    secretHeaderPresent: !!givenSecret,
+    secretConfigured: !!envSecret,
+    secretLengthsMatch: !!givenSecret && !!envSecret && givenSecret.length === envSecret.length,
     reqIp: req.ip,
     forwardedFor: req.get('x-forwarded-for') || null,
     clientIpHeader,

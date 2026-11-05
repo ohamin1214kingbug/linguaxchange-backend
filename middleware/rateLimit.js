@@ -2,8 +2,8 @@ const crypto = require('crypto')
 const rateLimit = require('express-rate-limit')
 const { ipKeyGenerator } = rateLimit
 
-// Keyed by IP (via req.ip, which requires app.set('trust proxy', 1) in
-// index.js to reflect the real client behind Railway's proxy). Generous
+// Keyed by IP (via req.ip, which requires app.set('trust proxy', 2) in
+// index.js to reflect the real client behind Railway's proxies). Generous
 // enough to not lock out someone mistyping a password a few times or a
 // shared office/NAT network, tight enough to make brute-forcing or mass
 // account creation impractical.
