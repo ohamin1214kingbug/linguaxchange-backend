@@ -125,30 +125,6 @@ app.use('/api/resources', resourceRoutes)
 app.use('/api/university', universityRoutes)
 app.use('/api/records', recordRoutes)
 
-// TEMPORARY (2026-11-05): shows how the rate limiter sees a request, to check
-// that the gongbuleng.com proxy's visitor IP is trusted. Returns only the
-// caller's own addresses and never the secret. Remove once checked.
-const { keyGenerator: debugKeyGenerator } = require('./middleware/rateLimit')
-const { ipKeyGenerator: debugIpKey } = require('express-rate-limit')
-app.get('/api/_debug/client-key', (req, res) => {
-  const clientIpHeader = req.get('x-client-ip') || null
-  const rateLimitKey = debugKeyGenerator(req)
-  const givenSecret = req.get('x-proxy-secret')
-  const envSecret = process.env.API_PROXY_SECRET
-  res.json({
-    // Yes/no only: neither value nor length leaves the server.
-    secretHeaderPresent: !!givenSecret,
-    secretConfigured: !!envSecret,
-    secretLengthsMatch: !!givenSecret && !!envSecret && givenSecret.length === envSecret.length,
-    reqIp: req.ip,
-    forwardedFor: req.get('x-forwarded-for') || null,
-    clientIpHeader,
-    secretAccepted: !!clientIpHeader && rateLimitKey === debugIpKey(clientIpHeader) && rateLimitKey !== debugIpKey(req.ip),
-    rateLimitKey,
-    replica: process.env.RAILWAY_REPLICA_ID || null,
-  })
-})
-
 // Oversized bodies get rejected by body-parser before any route handler
 // runs, and Express's default error page for that is an HTML stack trace —
 // surface it as JSON like every other error response.
