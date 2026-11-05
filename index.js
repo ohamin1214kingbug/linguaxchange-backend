@@ -83,11 +83,11 @@ app.use(cors({
 // try to re-read the same (already-consumed) request stream, so pick one
 // parser per request instead of chaining two.
 //
-// 14mb covers a 10MB PDF: base64 inflates by ~33%, so the encoded body is
-// larger than the file the teacher picked.
-const uploadJsonParser = express.json({ limit: '14mb' })
+// 21mb covers the largest body the site sends: a report with three 5MB
+// evidence images (base64 inflates by ~33%). A 10MB class PDF fits too.
+const uploadJsonParser = express.json({ limit: '21mb' })
 const defaultJsonParser = express.json({ limit: '100kb' })
-const UPLOAD_PATHS = ['/api/users', '/api/classes', '/api/resources']
+const UPLOAD_PATHS = ['/api/users', '/api/classes', '/api/resources', '/api/reports']
 app.use((req, res, next) => {
   const parser = UPLOAD_PATHS.some(p => req.path.startsWith(p)) ? uploadJsonParser : defaultJsonParser
   parser(req, res, err => {
