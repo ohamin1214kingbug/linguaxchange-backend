@@ -7,3 +7,5 @@ SECURITY_REVIEW.md
 
 # Local send log for scripts/announceRename.js: which member ids were emailed.
 scripts/.announce-rename-sent.json
+# Local send log for scripts/announceApproved.js.
+scripts/.announce-approved-sent.json
