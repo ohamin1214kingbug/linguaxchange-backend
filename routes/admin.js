@@ -7,6 +7,7 @@ const { recordWeeklyActivity } = require('../utils/streak')
 const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 const { fail } = require('../utils/failure')
 const { sendEmail } = require('../utils/mailer')
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { deleteAccount } = require('../utils/deleteAccount')
 const { cancelTeacherClasses } = require('../utils/classCancellation')
 
@@ -52,13 +53,36 @@ router.get('/classes', async (req, res) => {
   }
 })
 
+// The Google sign-up welcome email promises "we'll email you when it is", so
+// approval has to tell the member. Only a not-approved → approved change
+// returns a row, so a second click (or two admins at once) never sends the
+// email twice. is_approved can be null for email sign-ups, hence the or().
 router.post('/users/:id/approve', async (req, res) => {
   try {
-    const { error } = await supabase
+    const { data: approved, error } = await supabase
       .from('users')
       .update({ is_approved: true })
       .eq('id', req.params.id)
+      .or('is_approved.is.null,is_approved.eq.false')
+      .select('id, email, first_name')
     if (error) return fail(res, 400, 'Could not approve user', error)
+
+    const user = approved?.[0]
+    if (user) {
+      await sendEmail({
+        to: user.email,
+        subject: 'Your GongbuLeng account is approved',
+        text: `Hi ${user.first_name || 'there'}, your account is approved, so you can now create and teach classes: ${FRONTEND_URL}/classes/create`
+      })
+      // The approval itself has happened; a failed notification only costs
+      // the in-app copy of the email, so it is logged rather than surfaced.
+      const { error: notifyError } = await supabase.from('notifications').insert([{
+        user_id: user.id,
+        type: 'account_approved',
+        message: 'Your account is approved. You can now create and teach classes.'
+      }])
+      if (notifyError) console.error('[APPROVE_NOTIFY]', notifyError.message)
+    }
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not approve user' })
