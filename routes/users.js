@@ -4,7 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { getEarnedBadges } = require('../utils/badges')
 const { publicGetLimiter } = require('../middleware/rateLimit')
-const { isImplicitAutoSync } = require('../utils/timezonePolicy')
+const { isImplicitAutoSync, isValidTimezone } = require('../utils/timezonePolicy')
 const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { fail } = require('../utils/failure')
@@ -167,6 +167,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
   if (req.body.teach_language !== undefined && req.body.teach_language !== '' && req.body.teach_language !== null
       && !LANGUAGES.includes(req.body.teach_language)) {
     return res.status(400).json({ error: 'That is not a language we support' })
+  }
+  if (req.body.timezone !== undefined && !isValidTimezone(req.body.timezone)) {
+    return res.status(400).json({ error: 'That is not a valid time zone' })
   }
 
   const updates = {}

@@ -1,4 +1,19 @@
-const { isImplicitAutoSync } = require('../utils/timezonePolicy')
+const { isImplicitAutoSync, isValidTimezone } = require('../utils/timezonePolicy')
+
+describe('isValidTimezone', () => {
+  test('accepts IANA names and "not set yet"', () => {
+    expect(isValidTimezone('Europe/Madrid')).toBe(true)
+    expect(isValidTimezone('Asia/Seoul')).toBe(true)
+    expect(isValidTimezone(null)).toBe(true)
+    expect(isValidTimezone('')).toBe(true)
+  })
+
+  test('rejects names Intl cannot use, and non-strings', () => {
+    expect(isValidTimezone('Mars/Olympus')).toBe(false)
+    expect(isValidTimezone('Madrid')).toBe(false)
+    expect(isValidTimezone(42)).toBe(false)
+  })
+})
 
 // Only an implicit auto-sync may be suppressed for a manual user. The first
 // version of this guard asked "is the incoming source not 'manual'?", which
