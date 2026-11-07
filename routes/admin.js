@@ -108,9 +108,10 @@ router.post('/users/:id/reject', async (req, res) => {
 // POST /api/admin/users/:id/credit — manual grant (support cases, goodwill,
 // etc). Mirrors the exact balance-update + audit-row shape every other
 // credit change already uses (see routes/enrollments.js) rather than a
-// separate code path, and reuses 'earned' since the type CHECK constraint
-// only allows spent/earned/refunded — there's no dedicated "granted" type,
-// and adding one is a bigger change than a description string covers.
+// separate code path. Logged as 'bonus', the type invite bananas use
+// (migrations/add_referrals.sql): it used to be 'earned', which
+// creditSpendGate reads as "has taught", so a top-up unlocked a member's
+// last banana without them ever teaching.
 router.post('/users/:id/credit', async (req, res) => {
   const amount = parseInt(req.body.amount)
   if (!Number.isInteger(amount) || amount <= 0) {
@@ -127,7 +128,7 @@ router.post('/users/:id/credit', async (req, res) => {
     await recordCreditTransaction(supabase, {
       user_id: req.params.id,
       amount,
-      type: 'earned',
+      type: 'bonus',
       description: req.body.description || 'Credit added by admin'
     })
 
