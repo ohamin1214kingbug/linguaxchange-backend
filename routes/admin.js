@@ -10,6 +10,7 @@ const { sendEmail } = require('../utils/mailer')
 const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { deleteAccount } = require('../utils/deleteAccount')
 const { cancelTeacherClasses } = require('../utils/classCancellation')
+const { pushNotifications } = require('../utils/push')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -76,12 +77,14 @@ router.post('/users/:id/approve', async (req, res) => {
       })
       // The approval itself has happened; a failed notification only costs
       // the in-app copy of the email, so it is logged rather than surfaced.
-      const { error: notifyError } = await supabase.from('notifications').insert([{
+      const rows = [{
         user_id: user.id,
         type: 'account_approved',
         message: 'Your account is approved. You can now create and teach classes.'
-      }])
+      }]
+      const { error: notifyError } = await supabase.from('notifications').insert(rows)
       if (notifyError) console.error('[APPROVE_NOTIFY]', notifyError.message)
+      else pushNotifications(rows)
     }
     res.json({ success: true })
   } catch (e) {
@@ -133,11 +136,13 @@ router.post('/users/:id/credit', async (req, res) => {
     // clears the threshold should clear the flag too.
     await resetLowCreditNotificationIfToppedUp(req.params.id, newBalance)
 
-    await supabase.from('notifications').insert([{
+    const rows = [{
       user_id: req.params.id,
       type: 'credit_added',
       message: `You received ${amount} credit${amount === 1 ? '' : 's'}`
-    }])
+    }]
+    await supabase.from('notifications').insert(rows)
+    pushNotifications(rows)
 
     res.json({ success: true, balance: newBalance })
   } catch (e) {

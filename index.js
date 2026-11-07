@@ -45,6 +45,7 @@ const recordRoutes = require('./routes/records')
 const assignmentRoutes = require('./routes/assignments')
 const classAlertRoutes = require('./routes/classAlerts')
 const referralRoutes = require('./routes/referrals')
+const pushRoutes = require('./routes/push')
 
 const app = express()
 
@@ -128,6 +129,7 @@ app.use('/api/university', universityRoutes)
 app.use('/api/records', recordRoutes)
 app.use('/api/class-alerts', classAlertRoutes)
 app.use('/api/referrals', referralRoutes)
+app.use('/api/push', pushRoutes)
 
 // Oversized bodies get rejected by body-parser before any route handler
 // runs, and Express's default error page for that is an HTML stack trace —
