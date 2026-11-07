@@ -12,4 +12,18 @@ function isImplicitAutoSync(updates) {
   return updates.timezone !== undefined && updates.timezone_source === undefined
 }
 
-module.exports = { isImplicitAutoSync }
+// The zone is stored as given and later handed to Intl for every class time
+// and reminder email, so a bad name has to stop here. Empty means "not set
+// yet", which every reader already handles.
+function isValidTimezone(timezone) {
+  if (timezone === null || timezone === '') return true
+  if (typeof timezone !== 'string') return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone })
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+module.exports = { isImplicitAutoSync, isValidTimezone }
