@@ -11,6 +11,7 @@ const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { decodePdf } = require('../utils/pdfUpload')
 const { fail } = require('../utils/failure')
+const { notifyClassAlerts } = require('../utils/classAlerts')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -225,6 +226,8 @@ router.post('/', requireAuth, async (req, res) => {
     }
 
     res.status(201).json({ ...cls, sessionCount: sessionDates.length })
+    // After the response: the teacher shouldn't wait on other members' email.
+    if (cls.status === 'approved') notifyClassAlerts(cls)
   } catch (e) {
     console.log('CATCH ERROR:', e.message)
     fail(res, 500, 'Could not approve class', e)
@@ -259,7 +262,7 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res) => {
       .from('classes')
       .update({ status: 'approved' })
       .eq('id', req.params.id)
-      .select('id, title, teacher_id')
+      .select('id, title, teacher_id, language_code, level')
       .single()
     if (error) return fail(res, 400, 'Could not approve class', error)
 
@@ -276,6 +279,7 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res) => {
     })
 
     res.json({ success: true })
+    notifyClassAlerts(cls)
   } catch (e) {
     res.status(500).json({ error: 'Could not approve class' })
   }
