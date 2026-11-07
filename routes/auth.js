@@ -19,6 +19,7 @@ const supabase = createClient(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { fail } = require('../utils/failure')
+const { resolveReferrer } = require('../utils/referrals')
 const { isSuspended } = require('../utils/suspension')
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 // Long enough to finish the rest of the registration form after verifying,
@@ -35,7 +36,7 @@ const SIGNUP_CREDIT_GRANT = 3
 // POST /api/auth/register
 router.post('/register', registerLimiter, async (req, res) => {
   const {
-    email, password, first_name, last_name, nationality, phone_number, verified_token,
+    email, password, first_name, last_name, nationality, phone_number, verified_token, invite_code,
     bio, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation,
   } = req.body
 
@@ -79,6 +80,8 @@ router.post('/register', registerLimiter, async (req, res) => {
     }
 
     const password_hash = await bcrypt.hash(password, 10)
+    // A bad or unknown invite code is ignored, never a reason to refuse signup.
+    const referred_by = await resolveReferrer(invite_code)
 
     const { data: newUser, error } = await supabase
       .from('users')
@@ -92,6 +95,9 @@ router.post('/register', registerLimiter, async (req, res) => {
         learn_languages: Array.isArray(learn_languages) ? learn_languages : [],
         has_certificate: typeof has_certificate === 'boolean' ? has_certificate : null,
         certificate_explanation: certificate_explanation || null,
+        // Only sent when set, so a signup without an invite never depends on
+        // the column existing.
+        ...(referred_by ? { referred_by } : {}),
       }])
       .select('id, email, first_name')
       .single()
@@ -334,7 +340,7 @@ router.post('/login', loginLimiter, async (req, res) => {
 
 // POST /api/auth/google-login
 router.post('/google-login', async (req, res) => {
-  const { access_token } = req.body
+  const { access_token, invite_code } = req.body
 
   if (!access_token) return res.status(400).json({ error: 'access_token required' })
 
@@ -386,9 +392,10 @@ router.post('/google-login', async (req, res) => {
       // grant across unlimited disposable Google accounts. The credits row
       // is created by POST /add-phone once they verify a real number (and
       // that number hasn't already hit phoneAccountLimitReached).
+      const referred_by = await resolveReferrer(invite_code)
       const { data: newUser, error } = await supabase
         .from('users')
-        .insert([{ email, first_name, last_name, google_id, is_approved: false, phone_verified: false }])
+        .insert([{ email, first_name, last_name, google_id, is_approved: false, phone_verified: false, ...(referred_by ? { referred_by } : {}) }])
         .select('id, email, first_name, is_approved, phone_verified')
         .single()
 

@@ -10,6 +10,7 @@ const { maybeSendLowCreditNudge } = require('../utils/lowCreditNudge')
 const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
 const { canConfirmAttendance } = require('../utils/attendanceConfirm')
 const { claimTeacherPayout, payTeacher, releaseClaim } = require('../utils/attendancePayout')
+const { rewardReferral } = require('../utils/referrals')
 const { canRefundCancellation } = require('../utils/enrollmentCancel')
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
 const { fail } = require('../utils/failure')
@@ -217,6 +218,8 @@ router.post('/:id/confirm', requireAuth, async (req, res) => {
 
     // Student attended a class this week — counts toward their weekly activity streak
     await recordWeeklyActivity(user_id)
+    // An invited member's first class pays them and whoever invited them.
+    await rewardReferral(user_id)
 
     const teacherId = existing.class_sessions?.classes?.teacher_id
 
