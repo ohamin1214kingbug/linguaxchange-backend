@@ -7,6 +7,7 @@ const { validateRequest, expiresAt, MAX_OPEN_PER_USER } = require('../utils/clas
 const { chargeForRequest, refundForRequest } = require('../utils/requestCredits')
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
 const { fail } = require('../utils/failure')
+const { notifyTeachersOfRequest } = require('../utils/requestAlerts')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -139,6 +140,8 @@ router.post('/', requireAuth, async (req, res) => {
       return fail(res, 400, 'Could not post your request', error)
     }
     res.status(201).json(data)
+    // After the response: the student shouldn't wait on teachers' email.
+    notifyTeachersOfRequest(data)
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not post your request' })
