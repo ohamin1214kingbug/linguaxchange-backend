@@ -8,6 +8,7 @@ const { chargeForRequest, refundForRequest } = require('../utils/requestCredits'
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
 const { fail } = require('../utils/failure')
 const { notifyTeachersOfRequest } = require('../utils/requestAlerts')
+const { pushNotifications } = require('../utils/push')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -262,14 +263,16 @@ router.post('/:id/fulfill', requireAuth, async (req, res) => {
     // they join and pay normally like anyone else.
     const enrolled = await enrolRequester(request, cls, firstSession)
 
-    await supabase.from('notifications').insert(userIds.map(user_id => ({
+    const rows = userIds.map(user_id => ({
       user_id,
       type: 'request_fulfilled',
       class_session_id: firstSession?.id || null,
       message: user_id === request.student_id && enrolled
         ? `You're in — '${cls.title}' answers your request for '${request.topic}'`
         : `Someone is teaching '${request.topic}' — '${cls.title}' is now open`
-    })))
+    }))
+    await supabase.from('notifications').insert(rows)
+    pushNotifications(rows)
 
     res.json({ success: true, notified: userIds.length, requesterEnrolled: enrolled })
   } catch (e) {

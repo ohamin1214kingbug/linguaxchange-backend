@@ -14,6 +14,7 @@ const { rewardReferral } = require('../utils/referrals')
 const { canRefundCancellation } = require('../utils/enrollmentCancel')
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
 const { fail } = require('../utils/failure')
+const { pushNotifications } = require('../utils/push')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -166,12 +167,14 @@ router.post('/', requireAuth, async (req, res) => {
     })
 
     if (cls?.teacher_id) {
-      await supabase.from('notifications').insert([{
+      const rows = [{
         user_id: cls.teacher_id,
         type: 'student_joined',
         class_session_id: session.id,
         message: `${student?.first_name || 'A student'} joined '${cls?.title}'`
-      }])
+      }]
+      await supabase.from('notifications').insert(rows)
+      pushNotifications(rows)
     }
 
     res.status(201).json(data)

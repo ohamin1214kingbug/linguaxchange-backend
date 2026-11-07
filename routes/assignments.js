@@ -227,6 +227,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
 const { validateFeedback } = require('../utils/assignmentValidation')
 const { isOverCap, countFeedbackEarnings, releaseFeedbackCredit } = require('../utils/assignmentCredits')
+const { pushNotifications } = require('../utils/push')
 
 // POST /api/assignments/:id/feedback — answer a request.
 //
@@ -290,11 +291,13 @@ router.post('/:id/feedback', requireAuth, async (req, res) => {
 
     // Best effort. A failed notification must not fail the feedback that was
     // already written.
-    await supabase.from('notifications').insert([{
+    const rows = [{
       user_id: request.student_id,
       type: 'assignment_answered',
       message: 'Your writing has feedback',
-    }])
+    }]
+    await supabase.from('notifications').insert(rows)
+    pushNotifications(rows)
 
     res.status(201).json(data)
   } catch (e) {

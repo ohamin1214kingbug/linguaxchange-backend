@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const { recordCreditTransaction } = require('./creditLedger')
+const { pushNotifications } = require('./push')
 
 let client
 function db() {
@@ -74,6 +75,7 @@ async function rewardReferral(studentId) {
     if (referrerPaid) rows.push({ user_id: friend.referred_by, type: 'credit_added', message: `${friend.first_name || 'A friend you invited'} took their first class. You got a banana.` })
     const { error: notifyError } = await db().from('notifications').insert(rows)
     if (notifyError) console.error('[REFERRAL] notification not saved:', notifyError.message)
+    else pushNotifications(rows)
 
     return { rewarded: true, referrerPaid }
   } catch (e) {

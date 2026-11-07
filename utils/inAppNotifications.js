@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js')
+const { pushNotifications } = require('./push')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -40,6 +41,7 @@ async function notifyParticipants(session, type, message) {
   const rows = userIds.map(user_id => ({ user_id, type, class_session_id: session.id, message }))
 
   const { error } = await supabase.from('notifications').insert(rows)
+  if (!error) pushNotifications(rows)
   return error ? 0 : rows.length
 }
 
