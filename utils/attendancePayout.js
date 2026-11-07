@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { recordCreditTransaction } = require('./creditLedger')
 const { resetLowCreditNotificationIfToppedUp } = require('./lowCreditNudge')
+const { rewardReferral } = require('./referrals')
 
 let client
 function db() {
@@ -104,6 +105,8 @@ async function releaseDueAttendancePayouts(now = new Date()) {
       const payout = await payTeacher(cls.teacher_id, 'Class attendance (paid automatically after 72 hours)')
       if (payout.ok) {
         paid++
+        // Paid out as attended, so it counts as an invited member's first class.
+        await rewardReferral(row.user_id)
       } else {
         console.error('[CREDIT_LEDGER] automatic attendance payout not applied for teacher', cls.teacher_id,
           'enrollment', row.id, payout.reason, '— will retry next tick')
