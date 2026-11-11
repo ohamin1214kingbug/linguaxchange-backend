@@ -51,10 +51,12 @@ Buenas noticias: tu cuenta de GongbuLeng está aprobada. Ya puedes crear y dar t
   return { subject: 'Your GongbuLeng account is approved', text }
 }
 
-const readSent = () => (fs.existsSync(SENT_LOG) ? JSON.parse(fs.readFileSync(SENT_LOG, 'utf8')) : [])
+const readSent = file => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : [])
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-async function main(args) {
+// `render` and `sentLog` let a later one-off (announceTeach.js) reuse this
+// runner with its own text and its own log.
+async function main(args, { render = renderEmail, sentLog = SENT_LOG } = {}) {
   require('dotenv').config()
   const { sendEmail } = require('../utils/mailer')
   const mode = args[0]
@@ -62,7 +64,7 @@ async function main(args) {
   if (mode === '--test') {
     const to = args[1]
     if (!to) throw new Error('Usage: --test you@example.com')
-    const result = await sendEmail({ to, ...renderEmail(null) })
+    const result = await sendEmail({ to, ...render(null) })
     console.log(result.ok ? `Test copy sent to ${to}.` : `Test send failed: ${result.error}`)
     return
   }
@@ -78,12 +80,12 @@ async function main(args) {
   if (users.length >= 1000) throw new Error('1000+ rows came back; add paging before sending.')
 
   const admins = (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
-  const sent = readSent()
+  const sent = readSent(sentLog)
   const pending = pendingRecipients(users, sent).filter(u => !admins.includes(u.email.toLowerCase()))
   console.log(`${pending.length} to email (${sent.length} already done, admins skipped). RESEND_API_KEY ${process.env.RESEND_API_KEY ? 'is' : 'is NOT'} set.`)
 
   if (mode !== '--send') {
-    const { subject, text } = renderEmail('Ana')
+    const { subject, text } = render('Ana')
     console.log(`\nDry run: nothing sent. The email, as "Ana" would get it:\n\nSubject: ${subject}\n\n${text}`)
     return
   }
@@ -93,10 +95,10 @@ async function main(args) {
 
   let failuresInARow = 0
   for (const [i, user] of pending.entries()) {
-    const result = await sendEmail({ to: user.email, ...renderEmail(user.first_name) })
+    const result = await sendEmail({ to: user.email, ...render(user.first_name) })
     if (result.ok) {
       sent.push(user.id)
-      fs.writeFileSync(SENT_LOG, JSON.stringify(sent))
+      fs.writeFileSync(sentLog, JSON.stringify(sent))
       failuresInARow = 0
       console.log(`${i + 1}/${pending.length} sent (user ${user.id})`)
     } else {
@@ -116,4 +118,4 @@ if (require.main === module) {
   main(process.argv.slice(2)).catch(e => { console.error(e.message); process.exit(1) })
 }
 
-module.exports = { renderEmail }
+module.exports = { renderEmail, main }
