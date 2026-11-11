@@ -17,7 +17,7 @@ describe('cancellationNotice', () => {
   // reported, or why. That is moderation information about another member.
   test('a platform cancellation reveals no reason at all', () => {
     const text = cancellationNotice({ ...base, byPlatform: true }).toLowerCase()
-    for (const leak of ['suspend', 'report', 'ban', 'violat', 'moderat', 'account']) {
+    for (const leak of ['suspend', 'report', 'banned', 'violat', 'moderat', 'account']) {
       expect(text).not.toContain(leak)
     }
   })

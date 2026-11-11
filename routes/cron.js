@@ -5,6 +5,7 @@ const { sendStartingSoonNotifications, sendLiveNotifications } = require('../uti
 const { refundExpiredRequests } = require('../utils/requestCredits')
 const { releaseDueFeedback, refundExpiredAssignments } = require('../utils/assignmentCredits')
 const { releaseDueAttendancePayouts } = require('../utils/attendancePayout')
+const { completeFinishedClasses } = require('../utils/classCompletion')
 const { runHealthChecks } = require('../utils/healthChecks')
 const { recordRun, REMINDER_JOB } = require('../utils/cronHeartbeat')
 
@@ -38,6 +39,10 @@ async function handleSendReminders(req, res) {
   // teacher unpaid: their banana reaches the teacher 72h after class.
   const { paid: attendancePaid } = await releaseDueAttendancePayouts()
 
+  // A class that is over closes itself, which is what the teaching badges
+  // and weekly streak count. Nobody has to press "Mark complete" any more.
+  const { completed: classesCompleted } = await completeFinishedClasses()
+
   // Recorded even when this tick sent nothing — that is what makes a silent
   // scheduler distinguishable from a quiet one. Never throws, so a failed
   // heartbeat cannot cost a reminder that already went out.
@@ -45,7 +50,7 @@ async function handleSendReminders(req, res) {
 
   res.json({
     ...summary, startingSoonNotified, liveNotified, requestsRefunded,
-    feedbackReleased, assignmentsRefunded, attendancePaid,
+    feedbackReleased, assignmentsRefunded, attendancePaid, classesCompleted,
   })
 }
 

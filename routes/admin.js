@@ -3,11 +3,11 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { recordCreditTransaction } = require('../utils/creditLedger')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
-const { recordWeeklyActivity } = require('../utils/streak')
 const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 const { fail } = require('../utils/failure')
 const { sendEmail } = require('../utils/mailer')
-const { FRONTEND_URL } = require('../utils/frontendUrl')
+const { renderEmail, CONTACT } = require('../utils/emailTemplate')
+const { approveMember } = require('../utils/memberApproval')
 const { deleteAccount } = require('../utils/deleteAccount')
 const { cancelTeacherClasses } = require('../utils/classCancellation')
 const { pushNotifications } = require('../utils/push')
@@ -54,40 +54,15 @@ router.get('/classes', async (req, res) => {
   }
 })
 
-// The Google sign-up welcome email promises "we'll email you when it is", so
-// approval has to tell the member. Only a not-approved → approved change
-// returns a row, so a second click (or two admins at once) never sends the
-// email twice. is_approved can be null for email sign-ups, hence the or().
+// Approval, its email and notification, and publishing the member's waiting
+// classes all live in utils/memberApproval.js, shared with the university
+// email confirmation.
 router.post('/users/:id/approve', async (req, res) => {
   try {
-    const { data: approved, error } = await supabase
-      .from('users')
-      .update({ is_approved: true })
-      .eq('id', req.params.id)
-      .or('is_approved.is.null,is_approved.eq.false')
-      .select('id, email, first_name')
-    if (error) return fail(res, 400, 'Could not approve user', error)
-
-    const user = approved?.[0]
-    if (user) {
-      await sendEmail({
-        to: user.email,
-        subject: 'Your GongbuLeng account is approved',
-        text: `Hi ${user.first_name || 'there'}, your account is approved, so you can now create and teach classes: ${FRONTEND_URL}/classes/create`
-      })
-      // The approval itself has happened; a failed notification only costs
-      // the in-app copy of the email, so it is logged rather than surfaced.
-      const rows = [{
-        user_id: user.id,
-        type: 'account_approved',
-        message: 'Your account is approved. You can now create and teach classes.'
-      }]
-      const { error: notifyError } = await supabase.from('notifications').insert(rows)
-      if (notifyError) console.error('[APPROVE_NOTIFY]', notifyError.message)
-      else pushNotifications(rows)
-    }
+    await approveMember(req.params.id)
     res.json({ success: true })
   } catch (e) {
+    console.error('[APPROVE]', e.message)
     res.status(500).json({ error: 'Could not approve user' })
   }
 })
@@ -212,7 +187,15 @@ router.post('/users/:id/suspend', async (req, res) => {
     await sendEmail({
       to: user.email,
       subject: 'Your GongbuLeng account has been suspended',
-      text: `Hi ${user.first_name},\n\nYour GongbuLeng account has been suspended until ${endsAt.toUTCString()}.\n\nReason: ${String(reason).trim()}\n\n${classes.cancelled ? `${classes.cancelled} of your upcoming class(es) have been cancelled and the students refunded.\n\n` : ''}If you believe this is a mistake, reply to this email.`
+      ...renderEmail({
+        heading: 'Your account has been suspended',
+        paragraphs: [
+          `Hi ${user.first_name}, your GongbuLeng account has been suspended.`,
+          classes.cancelled ? `${classes.cancelled} of your upcoming class(es) have been cancelled and the students refunded.` : '',
+          `If you believe this is a mistake, write to ${CONTACT}.`,
+        ],
+        box: [['Until:', endsAt.toUTCString()], ['Reason:', String(reason).trim()]],
+      }),
     }).catch(e => console.error('[SUSPEND] Notification email failed', e.message))
 
     res.json({ ...data, classes_cancelled: classes.cancelled, students_refunded: classes.refunded })
@@ -280,39 +263,4 @@ router.post('/users/:id/delete', async (req, res) => {
   }
 })
 
-// POST /api/admin/classes/:id/complete
-// Record-keeping/moderation only — does NOT grant credit. Credit is earned
-// solely via students confirming attendance (routes/enrollments.js
-// POST /:id/confirm), which scales with how many students the teacher
-// actually served instead of paying a flat amount regardless of class size.
-// This still drives the teacher's weekly streak and the badges "taught"
-// count, both of which key off classes.status = 'completed', not credits.
-router.post('/classes/:id/complete', async (req, res) => {
-  try {
-    // Get the class to find the teacher
-    const { data: cls, error: classError } = await supabase
-      .from('classes')
-      .select('teacher_id, status')
-      .eq('id', req.params.id)
-      .single()
-
-    if (classError || !cls) {
-      return res.status(404).json({ error: 'Class not found' })
-    }
-
-    // Mark class as completed
-    await supabase
-      .from('classes')
-      .update({ status: 'completed' })
-      .eq('id', req.params.id)
-
-    // Teacher taught a class this week — counts toward their weekly activity streak
-    await recordWeeklyActivity(cls.teacher_id)
-
-    res.json({ success: true })
-  } catch (e) {
-    console.error(e)
-    res.status(500).json({ error: 'Could not complete class' })
-  }
-})
 module.exports = router

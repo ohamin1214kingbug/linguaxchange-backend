@@ -2,7 +2,9 @@ const { Resend } = require('resend')
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null
 
-async function sendEmail({ to, subject, text }) {
+// `html` is optional: utils/emailTemplate.js builds it together with `text`.
+// The one-off scripts still send text only.
+async function sendEmail({ to, subject, text, html }) {
   if (!to) return { ok: false, error: 'no recipient' }
   if (!resend) {
     console.error(`[EMAIL] Skipped "${subject}" to ${to}: RESEND_API_KEY is not set`)
@@ -13,7 +15,8 @@ async function sendEmail({ to, subject, text }) {
       from: 'GongbuLeng <notifications@gongbuleng.com>',
       to,
       subject,
-      text
+      text,
+      ...(html ? { html } : {})
     })
     if (error) {
       console.error(`[EMAIL] Failed to send "${subject}" to ${to}:`, error.message)

@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('./mailer')
+const { renderEmail } = require('./emailTemplate')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -44,12 +45,16 @@ function formatSessionTime(sessionDateISO, timezone, timeFormat) {
   }
 }
 
-async function sendReminderEmail(to, first_name, subject, bodyLines) {
+async function sendReminderEmail(to, first_name, subject, bodyLines, joinLink) {
   if (!to) return
   await sendEmail({
     to,
     subject,
-    text: `Hi ${first_name || ''},\n\n${bodyLines.join('\n')}`
+    ...renderEmail({
+      heading: subject,
+      paragraphs: [`Hi ${first_name || 'there'},`, ...bodyLines],
+      button: { label: 'Join the class', url: joinLink },
+    }),
   })
 }
 
@@ -119,8 +124,7 @@ async function sendClassReminders(now = new Date()) {
         await sendReminderEmail(teacher?.email, teacher?.first_name, 'Your class starts in 1 hour', [
           `Your class '${cls.title}'${withWho} starts in about 1 hour, at ${teacherTime.display}.`,
           teacherTime.note || '',
-          `Join here: ${joinLink}`
-        ].filter(Boolean))
+        ], joinLink)
         if (teacher?.email) summary.remindersSent++
 
         for (const student of students) {
@@ -128,8 +132,7 @@ async function sendClassReminders(now = new Date()) {
           await sendReminderEmail(student.email, student.first_name, 'Your class starts in 1 hour', [
             `Your class with ${teacher?.first_name || 'your teacher'} starts in about 1 hour, at ${studentTime.display}.`,
             studentTime.note || '',
-            `Join here: ${joinLink}`
-          ].filter(Boolean))
+          ], joinLink)
           if (student.email) summary.remindersSent++
         }
       } catch (e) {

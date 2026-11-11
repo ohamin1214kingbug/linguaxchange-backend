@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken')
 const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
+const { renderEmail } = require('../utils/emailTemplate')
 const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
 const { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter } = require('../middleware/rateLimit')
 const { sendOtp, checkOtp, isValidPhoneNumber, otpErrorKey } = require('../utils/phoneVerify')
@@ -34,6 +35,22 @@ const { LANGUAGES, TEACH_LEVELS } = require('../utils/profileFields')
 const SIGNUP_CREDIT_GRANT = 3
 
 // POST /api/auth/register
+// Both sign-up paths send this. Until 2026-11 only Google sign-ups did.
+function sendWelcomeEmail({ email, first_name }) {
+  return sendEmail({
+    to: email,
+    subject: 'Welcome to GongbuLeng!',
+    ...renderEmail({
+      heading: `Welcome, ${first_name}!`,
+      paragraphs: [
+        `You start with ${SIGNUP_CREDIT_GRANT} bananas. Joining a class costs 1, and you earn 1 for every student who attends a class you teach.`,
+        "You can already browse classes and request the one you want. Teaching your own classes opens once your account is approved. We'll email you when it is.",
+      ],
+      button: { label: 'Browse classes', url: `${FRONTEND_URL}/classes` },
+    }),
+  })
+}
+
 router.post('/register', registerLimiter, async (req, res) => {
   const {
     email, password, first_name, last_name, nationality, phone_number, verified_token, invite_code,
@@ -119,6 +136,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       .from('credits')
       .insert([{ user_id: newUser.id, balance: SIGNUP_CREDIT_GRANT }])
 
+    await sendWelcomeEmail(newUser)
     await notifyAdminsOfPendingUser(newUser)
 
     const token = jwt.sign(
@@ -401,11 +419,7 @@ router.post('/google-login', async (req, res) => {
 
       if (error) return fail(res, 400, 'Google login failed', error)
 
-      await sendEmail({
-        to: email,
-        subject: 'Welcome to GongbuLeng!',
-        text: `Hi ${first_name}, welcome to GongbuLeng! You can already browse classes and request the one you want. Teaching your own classes opens once your account is approved — we'll email you when it is.`
-      })
+      await sendWelcomeEmail({ email, first_name })
 
       await notifyAdminsOfPendingUser(newUser)
 
@@ -454,7 +468,11 @@ router.post('/forgot-password', async (req, res) => {
     await sendEmail({
       to: email,
       subject: 'Reset your GongbuLeng password',
-      text: `Hi ${user.first_name}, click this link to reset your password: ${FRONTEND_URL}/auth/reset-password?token=${rawToken}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email.`
+      ...renderEmail({
+        heading: 'Reset your password',
+        paragraphs: [`Hi ${user.first_name}, use the button below to choose a new password.`, "This link expires in 1 hour. If you didn't request this, you can ignore this email."],
+        button: { label: 'Reset password', url: `${FRONTEND_URL}/auth/reset-password?token=${rawToken}` },
+      }),
     })
 
     res.json(genericResponse)

@@ -14,8 +14,8 @@
 function cancellationNotice({ title, firstName, byPlatform = false }) {
   const name = firstName || ''
   return byPlatform
-    ? `Hi ${name},\n\nThe class '${title}' has been cancelled and your credit has been refunded.\n\nSorry for the disruption — you can book another class any time.`
-    : `Hi ${name}, the class '${title}' has been cancelled by the teacher. Your credit has been refunded.`
+    ? `Hi ${name},\n\nThe class '${title}' has been cancelled and your banana has been refunded.\n\nSorry for the disruption — you can book another class any time.`
+    : `Hi ${name}, the class '${title}' has been cancelled by the teacher. Your banana has been refunded.`
 }
 
 module.exports = { cancellationNotice }
