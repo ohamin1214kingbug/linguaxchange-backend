@@ -11,6 +11,7 @@ const { approveMember } = require('../utils/memberApproval')
 const { deleteAccount } = require('../utils/deleteAccount')
 const { cancelTeacherClasses } = require('../utils/classCancellation')
 const { pushNotifications } = require('../utils/push')
+const { certificatePaths, CERTIFICATE_BUCKET } = require('../utils/certificateUpload')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -21,7 +22,7 @@ router.use(requireAuth, requireAdmin)
 
 // Explicit allowlist rather than select('*') — excludes password_hash and
 // reset_token/reset_token_expires, which have no reason to leave the DB.
-const ADMIN_USER_COLUMNS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, approval_reason, current_streak, longest_streak, timezone, phone_number, phone_verified, google_id, created_at, suspended_until, suspension_reason, deleted_at'
+const ADMIN_USER_COLUMNS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, is_approved, approval_reason, current_streak, longest_streak, timezone, phone_number, phone_verified, google_id, created_at, suspended_until, suspension_reason, deleted_at'
 
 router.get('/users', async (req, res) => {
   try {
@@ -64,6 +65,38 @@ router.post('/users/:id/approve', async (req, res) => {
   } catch (e) {
     console.error('[APPROVE]', e.message)
     res.status(500).json({ error: 'Could not approve user' })
+  }
+})
+
+// GET /api/admin/users/:id/certificate — the bucket is private, so a
+// 10-minute signed link is the only way to open the file.
+router.get('/users/:id/certificate', async (req, res) => {
+  try {
+    const { data: user, error } = await supabase
+      .from('users').select('certificate_path').eq('id', req.params.id).single()
+    if (error || !user?.certificate_path) return res.status(404).json({ error: 'No certificate on file' })
+    const { data, error: signError } = await supabase.storage
+      .from(CERTIFICATE_BUCKET).createSignedUrl(user.certificate_path, 10 * 60)
+    if (signError) return fail(res, 400, 'Could not open the certificate', signError)
+    res.json({ url: data.signedUrl })
+  } catch (e) {
+    res.status(500).json({ error: 'Could not open the certificate' })
+  }
+})
+
+// An admin removes a certificate that is not what it claims. The member can
+// upload another.
+router.delete('/users/:id/certificate', async (req, res) => {
+  try {
+    await supabase.storage.from(CERTIFICATE_BUCKET).remove(certificatePaths(req.params.id))
+    const { error } = await supabase
+      .from('users')
+      .update({ certificate_path: null, certificate_name: null, certificate_uploaded_at: null })
+      .eq('id', req.params.id)
+    if (error) return fail(res, 400, 'Could not remove the certificate', error)
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ error: 'Could not remove the certificate' })
   }
 })
 

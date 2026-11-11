@@ -30,6 +30,10 @@ function anonymizedFields(userId, now = new Date()) {
     learn_languages: null,
     has_certificate: null,
     certificate_explanation: null,
+    certificate_path: null,
+    certificate_name: null,
+    certificate_uploaded_at: null,
+    learn_details: {},
 
     // Credentials and contact. Nulling both password_hash and google_id is
     // what actually makes the account unreachable; token_valid_after kills

@@ -24,7 +24,7 @@ router.get('/export', requireAuth, async (req, res) => {
     const [profile, credits, transactions, classesTaught, enrollments, reviewsWritten, feedbackReceived, savedTeachers, reportsFiled] =
       await Promise.all([
         supabase.from('users')
-          .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, created_at, timezone, timezone_source, time_format, current_streak, longest_streak, phone_number, phone_verified, is_approved')
+          .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, learn_details, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, created_at, timezone, timezone_source, time_format, current_streak, longest_streak, phone_number, phone_verified, is_approved')
           .eq('id', id).single(),
         supabase.from('credits').select('balance').eq('user_id', id).maybeSingle(),
         supabase.from('credit_transactions').select('*').eq('user_id', id),

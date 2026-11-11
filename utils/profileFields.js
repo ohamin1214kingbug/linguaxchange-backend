@@ -10,4 +10,31 @@ const LANGUAGES = ['KO', 'ES', 'DE', 'EN', 'PT', 'FR', 'IT']
 // and every reader has to guess.
 const TEACH_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'Native']
 
-module.exports = { LANGUAGES, TEACH_LEVELS }
+// Someone learning a language is not a native speaker of it.
+const LEARN_LEVELS = TEACH_LEVELS.filter(level => level !== 'Native')
+const LEARN_NOTE_MAX = 200
+
+// learn_details is { [languageCode]: { level, note } }, written as a whole
+// by the profile form. Returns { ok, value } with empty entries dropped and
+// notes trimmed, or { ok: false, error }. Only languages in learnLanguages
+// are kept: un-ticking a language drops its detail too, instead of leaving a
+// level behind for a language the member no longer lists.
+function cleanLearnDetails(details, learnLanguages) {
+  if (details === null || typeof details !== 'object' || Array.isArray(details)) {
+    return { ok: false, error: 'Learning details must be an object' }
+  }
+  const listed = new Set(Array.isArray(learnLanguages) ? learnLanguages : [])
+  const value = {}
+  for (const [code, entry] of Object.entries(details)) {
+    if (!LANGUAGES.includes(code)) return { ok: false, error: 'That is not a language we support' }
+    if (!listed.has(code) || !entry || typeof entry !== 'object') continue
+    const level = entry.level || null
+    const note = typeof entry.note === 'string' ? entry.note.trim() : ''
+    if (level !== null && !LEARN_LEVELS.includes(level)) return { ok: false, error: 'That is not a valid level' }
+    if (note.length > LEARN_NOTE_MAX) return { ok: false, error: `Keep each description under ${LEARN_NOTE_MAX} characters` }
+    if (level || note) value[code] = { level, note }
+  }
+  return { ok: true, value }
+}
+
+module.exports = { LANGUAGES, TEACH_LEVELS, LEARN_LEVELS, LEARN_NOTE_MAX, cleanLearnDetails }
