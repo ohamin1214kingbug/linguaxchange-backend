@@ -1,4 +1,5 @@
 const { sendEmail } = require('./mailer')
+const { renderEmail } = require('./emailTemplate')
 const { FRONTEND_URL } = require('./frontendUrl')
 
 // Same source of truth requireAdmin/isAdmin use in middleware/auth.js —
@@ -17,7 +18,11 @@ async function notifyAdminsOfPendingUser(user) {
       await sendEmail({
         to: adminEmail,
         subject: 'New user waiting for approval',
-        text: `${user.first_name || 'A new user'} (${user.email}) just signed up and is waiting for approval. Review at ${FRONTEND_URL}/admin`
+        ...renderEmail({
+          heading: 'New member waiting for approval',
+          paragraphs: [`${user.first_name || 'A new user'} (${user.email}) just signed up and is waiting for approval.`],
+          button: { label: 'Review in admin', url: `${FRONTEND_URL}/admin` },
+        }),
       })
     } catch (e) {
       console.error('[ADMIN_NOTIFY] Failed to notify', adminEmail, e.message)

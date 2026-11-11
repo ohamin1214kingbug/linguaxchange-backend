@@ -1,6 +1,8 @@
 const { createClient } = require('@supabase/supabase-js')
 const { recordCreditTransaction } = require('./creditLedger')
 const { sendEmail } = require('./mailer')
+const { renderEmail } = require('./emailTemplate')
+const { FRONTEND_URL } = require('./frontendUrl')
 const { cancellationNotice } = require('./cancellationNotice')
 
 const supabase = createClient(
@@ -113,10 +115,16 @@ async function cancelClass(classId, cls, { byPlatform = false } = {}) {
         await sendEmail({
           to: enrollment.users?.email,
           subject: `'${cls.title}' has been cancelled`,
-          text: cancellationNotice({
-            title: cls.title,
-            firstName: enrollment.users?.first_name,
-            byPlatform
+          ...renderEmail({
+            heading: 'Your class was cancelled',
+            // The wording lives in cancellationNotice.js, which is tested on
+            // its own; its blank lines are the paragraph breaks.
+            paragraphs: cancellationNotice({
+              title: cls.title,
+              firstName: enrollment.users?.first_name,
+              byPlatform
+            }).split('\n\n'),
+            button: { label: 'Find another class', url: `${FRONTEND_URL}/classes` },
           })
         })
 

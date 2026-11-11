@@ -3,6 +3,8 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin, isAdmin } = require('../middleware/auth')
 const { sendEmail } = require('../utils/mailer')
+const { renderEmail } = require('../utils/emailTemplate')
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { buildSessionDates } = require('../utils/sessionDates')
 const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
 const { sortBySoonest, hasUpcomingSession } = require('../utils/classSearch')
@@ -275,7 +277,11 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res) => {
     await sendEmail({
       to: teacher?.email,
       subject: `Your class '${cls.title}' has been approved!`,
-      text: `Hi ${teacher?.first_name}, your class is now live and students can join.`
+      ...renderEmail({
+        heading: 'Your class is live',
+        paragraphs: [`Hi ${teacher?.first_name}, '${cls.title}' is approved. Students can join it now.`],
+        button: { label: 'Open your dashboard', url: `${FRONTEND_URL}/dashboard` },
+      }),
     })
 
     res.json({ success: true })
@@ -467,7 +473,9 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
       }
     }
 
-    const result = await cancelClass(cls.id, cls)
+    // An admin cancelling someone else's class must not tell its students
+    // "cancelled by the teacher": the teacher did not cancel anything.
+    const result = await cancelClass(cls.id, cls, { byPlatform: req.userId !== cls.teacher_id })
     res.json({ success: true, ...result })
   } catch (e) {
     console.error(e)

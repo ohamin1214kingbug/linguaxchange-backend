@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('./mailer')
+const { renderEmail } = require('./emailTemplate')
 const { FRONTEND_URL } = require('./frontendUrl')
 const { LANGUAGES, LEVELS } = require('./classRequests')
 
@@ -27,15 +28,12 @@ function buildAlertEmail(cls, firstName) {
   const link = `${FRONTEND_URL}/classes?language=${cls.language_code}&level=${cls.level}`
   return {
     subject: `New ${language} ${cls.level} class: ${cls.title}`,
-    text: [
-      `Hi ${firstName || 'there'},`,
-      '',
-      `A new ${language} ${cls.level} class was just posted on GongbuLeng: "${cls.title}".`,
-      '',
-      `See it and join: ${link}`,
-      '',
-      `You get this because you asked to hear about new ${language} classes. Turn it off on the same page.`,
-    ].join('\n'),
+    ...renderEmail({
+      heading: `New ${language} ${cls.level} class`,
+      paragraphs: [`Hi ${firstName || 'there'}, a new ${language} ${cls.level} class was just posted: "${cls.title}".`],
+      button: { label: 'See it and join', url: link },
+      footnote: `You get this because you asked to hear about new ${language} classes. Turn it off on the same page.`,
+    }),
   }
 }
 

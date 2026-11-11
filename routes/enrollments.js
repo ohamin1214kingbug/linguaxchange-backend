@@ -3,6 +3,8 @@ const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { recordCreditTransaction } = require('../utils/creditLedger')
 const { sendEmail } = require('../utils/mailer')
+const { renderEmail } = require('../utils/emailTemplate')
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { requireAuth } = require('../middleware/auth')
 const { pickNextUnjoinedSession } = require('../utils/pickSession')
 const { recordWeeklyActivity } = require('../utils/streak')
@@ -163,7 +165,11 @@ router.post('/', requireAuth, async (req, res) => {
     await sendEmail({
       to: teacher?.email,
       subject: `A student joined '${cls?.title}'`,
-      text: `Hi ${teacher?.first_name}, ${student?.first_name} has joined your class.`
+      ...renderEmail({
+        heading: 'A student joined your class',
+        paragraphs: [`Hi ${teacher?.first_name}, ${student?.first_name} has joined '${cls?.title}'.`],
+        button: { label: 'Open your dashboard', url: `${FRONTEND_URL}/dashboard` },
+      }),
     })
 
     if (cls?.teacher_id) {

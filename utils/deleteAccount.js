@@ -1,5 +1,6 @@
 const { cancelTeacherClasses } = require('./classCancellation')
 const { sendEmail } = require('./mailer')
+const { renderEmail, CONTACT } = require('./emailTemplate')
 const { anonymizedFields, OWN_DATA_DELETIONS } = require('./accountDeletion')
 
 // Separate from accountDeletion.js on purpose. That module is pure — a field
@@ -50,7 +51,14 @@ async function deleteAccount(supabase, user, { notify = true } = {}) {
     await sendEmail({
       to: user.email,
       subject: 'Your GongbuLeng account has been deleted',
-      text: `Hi ${user.first_name},\n\nYour GongbuLeng account has been deleted and your personal details have been removed.\n\nClasses you had scheduled were cancelled and the students enrolled in them were refunded. Records of past classes and credit transactions are kept without your name attached, because other members' history and our financial records depend on them.\n\nIf you didn't request this, reply to this email immediately.`
+      ...renderEmail({
+        heading: 'Your account has been deleted',
+        paragraphs: [
+          `Hi ${user.first_name}, your GongbuLeng account has been deleted and your personal details have been removed.`,
+          "Classes you had scheduled were cancelled and the students enrolled in them were refunded. Records of past classes and banana transactions are kept without your name attached, because other members' history and our financial records depend on them.",
+          `If you didn't request this, write to ${CONTACT} immediately.`,
+        ],
+      }),
     }).catch(e => console.error('[ACCOUNT_DELETE] Confirmation email failed', e.message))
   }
 

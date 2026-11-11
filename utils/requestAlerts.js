@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('./mailer')
+const { renderEmail } = require('./emailTemplate')
 const { FRONTEND_URL } = require('./frontendUrl')
 const { LANGUAGE_NAMES } = require('./classAlerts')
 const { formatSessionTime } = require('./classReminder')
@@ -24,17 +25,16 @@ function buildRequestEmail(request, teacher) {
   const link = `${FRONTEND_URL}/classes?tab=requests&language=${request.language_code}`
   return {
     subject: `A student wants a ${what} class: ${request.topic}`,
-    text: [
-      `Hi ${teacher.first_name || 'there'},`,
-      '',
-      `Someone on GongbuLeng asked for a ${what} class you could teach:`,
-      `"${request.topic}"`,
-      `Preferred time: ${when}${request.time_flexible ? ' (flexible)' : ''}`,
-      '',
-      `Answer it and every student who joins earns you a banana: ${link}`,
-      '',
-      'You get this because you teach this language. Turn these emails off in Settings.',
-    ].join('\n'),
+    ...renderEmail({
+      heading: `A student wants a ${what} class`,
+      paragraphs: [
+        `Hi ${teacher.first_name || 'there'}, someone asked for a class you could teach.`,
+        'Answer it and every student who joins earns you a banana.',
+      ],
+      box: [['Topic:', request.topic], ['Preferred time:', `${when}${request.time_flexible ? ' (flexible)' : ''}`]],
+      button: { label: 'See the request', url: link },
+      footnote: 'You get this because you teach this language. Turn these emails off in Settings.',
+    }),
   }
 }
 

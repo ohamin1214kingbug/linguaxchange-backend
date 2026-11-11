@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('./mailer')
+const { renderEmail } = require('./emailTemplate')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -73,12 +74,20 @@ async function claimAndSend(userId, balance) {
 
   const whatItsGoodFor = balance === 1
     ? 'enough for one more class'
-    : "not quite enough to join another class yet — you'll need to earn more first"
+    : "not quite enough to join another class yet"
+  const bananas = `${balance} banana${balance === 1 ? '' : 's'}`
 
   await sendEmail({
     to: user.email,
-    subject: `You're down to ${balance} credit${balance === 1 ? '' : 's'}`,
-    text: `Hi ${user.first_name || ''}, you're down to ${balance} credit${balance === 1 ? '' : 's'} on GongbuLeng — ${whatItsGoodFor}.\n\nTeach a class to earn more credits: ${FRONTEND_URL}/classes/create`
+    subject: `You're down to ${bananas}`,
+    ...renderEmail({
+      heading: `You're down to ${bananas}`,
+      paragraphs: [
+        `Hi ${user.first_name || 'there'}, you're down to ${bananas} on GongbuLeng, ${whatItsGoodFor}.`,
+        'Teach a class to earn more: 1 banana for every student who attends.',
+      ],
+      button: { label: 'Create a class', url: `${FRONTEND_URL}/classes/create` },
+    }),
   })
 }
 
