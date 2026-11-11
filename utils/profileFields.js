@@ -37,4 +37,8 @@ function cleanLearnDetails(details, learnLanguages) {
   return { ok: true, value }
 }
 
-module.exports = { LANGUAGES, TEACH_LEVELS, LEARN_LEVELS, LEARN_NOTE_MAX, cleanLearnDetails }
+// The card colours a member can pick. Same list as the CHECK in
+// migrations/add_profile_color.sql and lib/profileColors.js in the frontend.
+const PROFILE_COLORS = ['yellow', 'blue', 'coral', 'green', 'purple', 'teal', 'white']
+
+module.exports = { LANGUAGES, TEACH_LEVELS, LEARN_LEVELS, LEARN_NOTE_MAX, PROFILE_COLORS, cleanLearnDetails }
