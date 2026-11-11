@@ -10,13 +10,14 @@ const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { fail } = require('../utils/failure')
 const { decodeImage } = require('../utils/imageUpload')
 const { parseUserQuery, MAX_RESULTS, FUZZY_THRESHOLD } = require('../utils/userSearch')
-const { LANGUAGES, TEACH_LEVELS } = require('../utils/profileFields')
+const { LANGUAGES, TEACH_LEVELS, cleanLearnDetails } = require('../utils/profileFields')
+const { decodeCertificate, cleanFileName, certificatePaths, CERTIFICATE_BUCKET } = require('../utils/certificateUpload')
 
 // Everything the profile screen needs. PUBLIC_FIELDS omits email; the
 // owner-only responses add it. notification_preferences and the teaching
 // defaults are owner-only too — no one else needs to see your settings.
-const PUBLIC_FIELDS = 'id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, university_domain, university_verified_at'
-const USER_FIELDS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, notification_preferences, default_class_duration_minutes, default_max_students, university_domain, university_verified_at'
+const PUBLIC_FIELDS = 'id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_uploaded_at, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, university_domain, university_verified_at'
+const USER_FIELDS = 'id, email, phone_verified, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, notification_preferences, default_class_duration_minutes, default_max_students, university_domain, university_verified_at'
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -150,12 +151,73 @@ router.post('/:id/avatar', requireAuth, async (req, res) => {
   }
 })
 
+// POST /api/users/:id/certificate — a teacher's language certificate.
+//
+// Private bucket, unlike avatars: a certificate can show a date of birth or
+// an ID number. Students only learn that one is on file
+// (certificate_uploaded_at); admins open it through a signed link
+// (routes/admin.js). Shown as soon as it is uploaded, no review step; an
+// admin can remove it.
+router.post('/:id/certificate', requireAuth, async (req, res) => {
+  if (req.userId !== parseInt(req.params.id)) {
+    return res.status(403).json({ error: 'You can only edit your own profile' })
+  }
+  const decoded = decodeCertificate(req.body.file)
+  if (!decoded.ok) return res.status(400).json({ error: decoded.error })
+
+  try {
+    // Replacing a PDF with a JPG would otherwise leave the PDF behind.
+    await supabase.storage.from(CERTIFICATE_BUCKET).remove(certificatePaths(req.userId))
+    const path = `${req.userId}.${decoded.ext}`
+    const { error: uploadError } = await supabase.storage
+      .from(CERTIFICATE_BUCKET)
+      .upload(path, decoded.buffer, { contentType: decoded.mime, upsert: true })
+    if (uploadError) return fail(res, 400, 'Could not upload the certificate', uploadError)
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({
+        certificate_path: path,
+        certificate_name: cleanFileName(req.body.name),
+        certificate_uploaded_at: new Date().toISOString(),
+        has_certificate: true,
+      })
+      .eq('id', req.userId)
+      .select(USER_FIELDS)
+      .single()
+    if (error) return fail(res, 400, 'Could not upload the certificate', error)
+    res.json(data)
+  } catch (e) {
+    console.error('[CERTIFICATE]', e.message)
+    res.status(500).json({ error: 'Could not upload the certificate' })
+  }
+})
+
+router.delete('/:id/certificate', requireAuth, async (req, res) => {
+  if (req.userId !== parseInt(req.params.id)) {
+    return res.status(403).json({ error: 'You can only edit your own profile' })
+  }
+  try {
+    await supabase.storage.from(CERTIFICATE_BUCKET).remove(certificatePaths(req.userId))
+    const { data, error } = await supabase
+      .from('users')
+      .update({ certificate_path: null, certificate_name: null, certificate_uploaded_at: null })
+      .eq('id', req.userId)
+      .select(USER_FIELDS)
+      .single()
+    if (error) return fail(res, 400, 'Could not remove the certificate', error)
+    res.json(data)
+  } catch (e) {
+    res.status(500).json({ error: 'Could not remove the certificate' })
+  }
+})
+
 // PATCH /api/users/:id
 router.patch('/:id', requireAuth, async (req, res) => {
   if (req.userId !== parseInt(req.params.id)) {
     return res.status(403).json({ error: 'You can only edit your own profile' })
   }
-  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format', 'notification_preferences', 'default_class_duration_minutes', 'default_max_students']
+  const allowed = ['bio', 'nationality', 'photo_url', 'teach_language', 'teach_level', 'learn_languages', 'learn_details', 'has_certificate', 'certificate_explanation', 'first_name', 'last_name', 'timezone', 'timezone_source', 'time_format', 'notification_preferences', 'default_class_duration_minutes', 'default_max_students']
   // Registration checks these and this route did not, so a value set
   // correctly at signup could be replaced with anything afterwards. That is
   // how a translated label — "원어민" instead of "Native" — was stored as a
@@ -167,6 +229,13 @@ router.patch('/:id', requireAuth, async (req, res) => {
   if (req.body.teach_language !== undefined && req.body.teach_language !== '' && req.body.teach_language !== null
       && !LANGUAGES.includes(req.body.teach_language)) {
     return res.status(400).json({ error: 'That is not a language we support' })
+  }
+  // Checked against the learn_languages sent alongside it: the form writes
+  // both, and a level for a language no longer ticked is dropped.
+  if (req.body.learn_details !== undefined) {
+    const cleaned = cleanLearnDetails(req.body.learn_details, req.body.learn_languages)
+    if (!cleaned.ok) return res.status(400).json({ error: cleaned.error })
+    req.body.learn_details = cleaned.value
   }
   if (req.body.timezone !== undefined && !isValidTimezone(req.body.timezone)) {
     return res.status(400).json({ error: 'That is not a valid time zone' })

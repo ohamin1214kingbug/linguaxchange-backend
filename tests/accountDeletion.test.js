@@ -9,6 +9,7 @@ const PII_COLUMNS = [
   'email', 'password_hash', 'first_name', 'last_name', 'nationality',
   'photo_url', 'bio', 'approval_reason', 'teach_language', 'teach_level',
   'learn_languages', 'has_certificate', 'certificate_explanation',
+  'certificate_path', 'certificate_name', 'certificate_uploaded_at', 'learn_details',
   'reset_token', 'reset_token_expires', 'timezone', 'google_id',
   'phone_number', 'phone_verified', 'timezone_source', 'time_format'
 ]

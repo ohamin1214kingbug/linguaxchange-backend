@@ -32,11 +32,15 @@ router.get('/', publicGetLimiter, async (req, res) => {
     let query = supabase
       .from('classes')
       .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status)')
-      .eq('status', 'approved')
       .order('session_date', { foreignTable: 'class_sessions', ascending: true })
 
+    // A teacher's own list includes finished classes, which close themselves
+    // as 'completed' (utils/classCompletion.js); browsing only ever shows
+    // approved ones.
     if (req.query.teacher_id) {
-      query = query.eq('teacher_id', req.query.teacher_id)
+      query = query.eq('teacher_id', req.query.teacher_id).in('status', ['approved', 'completed'])
+    } else {
+      query = query.eq('status', 'approved')
     }
     if (req.query.language_code) {
       query = query.eq('language_code', req.query.language_code)
@@ -111,7 +115,7 @@ router.get('/:id/roster', requireAuth, async (req, res) => {
     const { data: enrollments } = sessionIds.length
       ? await supabase
           .from('class_enrollments')
-          .select('class_session_id, status, attended, student:users!user_id(id, first_name, last_name, photo_url)')
+          .select('class_session_id, status, attended, student:users!user_id(id, first_name, last_name, photo_url, learn_details)')
           .in('class_session_id', sessionIds)
       : { data: [] }
 

@@ -2,6 +2,7 @@ const { cancelTeacherClasses } = require('./classCancellation')
 const { sendEmail } = require('./mailer')
 const { renderEmail, CONTACT } = require('./emailTemplate')
 const { anonymizedFields, OWN_DATA_DELETIONS } = require('./accountDeletion')
+const { certificatePaths, CERTIFICATE_BUCKET } = require('./certificateUpload')
 
 // Separate from accountDeletion.js on purpose. That module is pure — a field
 // map and a table list, no imports — which is what lets its tests assert
@@ -39,6 +40,8 @@ async function deleteAccount(supabase, user, { notify = true } = {}) {
 
   await supabase.storage.from('avatars')
     .remove(['jpg', 'png', 'webp'].map(ext => `avatars/${user.id}.${ext}`))
+  // Private, but still theirs: a certificate is a personal document.
+  await supabase.storage.from(CERTIFICATE_BUCKET).remove(certificatePaths(user.id))
 
   const { error: anonError } = await supabase
     .from('users')
