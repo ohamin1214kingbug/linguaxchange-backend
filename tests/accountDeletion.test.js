@@ -18,7 +18,7 @@ const PII_COLUMNS = [
 const KEPT_COLUMNS = [
   'id', 'created_at', 'updated_at', 'last_login', 'current_streak',
   'longest_streak', 'last_active_week', 'is_approved', 'token_valid_after',
-  'deleted_at'
+  'deleted_at', 'profile_color'
 ]
 
 describe('anonymizedFields', () => {

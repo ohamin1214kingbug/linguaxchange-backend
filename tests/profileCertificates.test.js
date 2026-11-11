@@ -1,4 +1,14 @@
-const { cleanLearnDetails, LEARN_LEVELS } = require('../utils/profileFields')
+const fs = require('fs')
+const path = require('path')
+const { cleanLearnDetails, LEARN_LEVELS, PROFILE_COLORS } = require('../utils/profileFields')
+
+// The database refuses any colour its CHECK does not list, so the list the
+// route validates against must match it exactly.
+test('card colours match the migration CHECK', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '../migrations/add_profile_color.sql'), 'utf8')
+  const listed = /IN \(([^)]+)\)/.exec(sql)[1].match(/'(\w+)'/g).map(c => c.slice(1, -1))
+  expect(listed).toEqual(PROFILE_COLORS)
+})
 const { decodeCertificate, cleanFileName, certificatePaths } = require('../utils/certificateUpload')
 
 describe('cleanLearnDetails', () => {
