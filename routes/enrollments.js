@@ -325,19 +325,36 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
 })
 
 // GET /api/enrollments
+// Each session also carries who else joined it (classmates), for the class
+// history page. First name and photo only, and only for sessions this
+// member is enrolled in: the people they were in a video call with, not a
+// roster of strangers. Cancelled places are dropped, and so is the member
+// themselves.
 router.get('/', requireAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('class_enrollments')
-      .select('*, class_sessions(*, classes(*, teacher:users!teacher_id(id, first_name, last_name, photo_url)))')
+      .select('*, class_sessions(*, classes(*, teacher:users!teacher_id(id, first_name, last_name, photo_url)), class_enrollments(status, student:users!user_id(id, first_name, photo_url)))')
       .eq('user_id', req.userId)
       .order('created_at', { ascending: false })
 
     if (error) return fail(res, 400, 'Could not fetch enrollments', error)
-    res.json(data)
+    res.json((data || []).map(e => withClassmates(e, req.userId)))
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch enrollments' })
   }
 })
 
+// Pure: swaps the session's raw enrollment list for its classmates.
+function withClassmates(enrollment, userId) {
+  const session = enrollment.class_sessions
+  if (!session) return enrollment
+  const { class_enrollments: others = [], ...rest } = session
+  const classmates = others
+    .filter(o => o.status !== 'cancelled' && o.student && o.student.id !== userId)
+    .map(o => o.student)
+  return { ...enrollment, class_sessions: { ...rest, classmates } }
+}
+
 module.exports = router
+module.exports.withClassmates = withClassmates
