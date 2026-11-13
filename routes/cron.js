@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { sendClassReminders } = require('../utils/classReminder')
-const { sendStartingSoonNotifications, sendLiveNotifications } = require('../utils/inAppNotifications')
+const { sendStartingSoonNotifications, sendLiveNotifications, sendEndedNotifications } = require('../utils/inAppNotifications')
 const { refundExpiredRequests } = require('../utils/requestCredits')
 const { releaseDueFeedback, refundExpiredAssignments } = require('../utils/assignmentCredits')
 const { releaseDueAttendancePayouts } = require('../utils/attendancePayout')
@@ -23,6 +23,7 @@ async function handleSendReminders(req, res) {
   const summary = await sendClassReminders()
   const startingSoonNotified = await sendStartingSoonNotifications()
   const liveNotified = await sendLiveNotifications()
+  const endedNotified = await sendEndedNotifications()
   // Posting a request costs a credit; one nobody answered has to give it
   // back. Runs on this tick rather than its own schedule so there's no
   // second pinger to configure — the work is a cheap indexed lookup that
@@ -49,7 +50,7 @@ async function handleSendReminders(req, res) {
   await recordRun(REMINDER_JOB)
 
   res.json({
-    ...summary, startingSoonNotified, liveNotified, requestsRefunded,
+    ...summary, startingSoonNotified, liveNotified, endedNotified, requestsRefunded,
     feedbackReleased, assignmentsRefunded, attendancePaid, classesCompleted,
   })
 }
