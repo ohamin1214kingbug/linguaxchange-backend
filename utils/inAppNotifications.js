@@ -98,4 +98,66 @@ async function sendLiveNotifications(now = new Date()) {
     session => `'${session.classes?.title}' has started`)
 }
 
-module.exports = { computeStartingSoonWindow, computeLiveWindow, sendStartingSoonNotifications, sendLiveNotifications }
+// After a class: ask each student who has not confirmed yet to confirm and
+// review. Confirming is what pays the teacher straight away (otherwise after
+// 72h) and unlocks the review, and both were easy to miss. Students only:
+// the teacher has nothing to confirm.
+const ENDED_GRACE_MS = 10 * 60 * 1000
+// Only sessions that ended recently. The first run after deploy must not
+// notify about every class since the beginning.
+const ENDED_LOOKBACK_MS = 24 * 60 * 60 * 1000
+
+// Pure. Over (with a few minutes' grace for classes that run long) and not
+// longer ago than the lookback.
+function isRecentlyEnded(session, now = new Date()) {
+  const end = new Date(session.session_date).getTime() + (session.classes?.duration_minutes || 60) * 60 * 1000
+  return end + ENDED_GRACE_MS <= now.getTime() && now.getTime() - end <= ENDED_LOOKBACK_MS
+}
+
+async function sendEndedNotifications(now = new Date()) {
+  // Duration lives on the class, so the end time is worked out here rather
+  // than in the query; the query only bounds the start.
+  const { data: sessions } = await supabase
+    .from('class_sessions')
+    .select('id, session_date, classes(title, duration_minutes)')
+    .eq('status', 'scheduled')
+    .is('ended_notified_at', null)
+    .gte('session_date', new Date(now.getTime() - ENDED_LOOKBACK_MS - 6 * 60 * 60 * 1000).toISOString())
+    .lte('session_date', now.toISOString())
+
+  let sent = 0
+  for (const session of (sessions || []).filter(s => isRecentlyEnded(s, now))) {
+    try {
+      const { data: claimed } = await supabase
+        .from('class_sessions')
+        .update({ ended_notified_at: now.toISOString() })
+        .eq('id', session.id)
+        .is('ended_notified_at', null)
+        .select('id')
+      if (!claimed || claimed.length === 0) continue
+
+      // 'confirmed' = booked and not yet confirmed as attended.
+      const { data: enrollments } = await supabase
+        .from('class_enrollments')
+        .select('user_id')
+        .eq('class_session_id', session.id)
+        .eq('status', 'confirmed')
+      const rows = (enrollments || []).map(e => ({
+        user_id: e.user_id,
+        type: 'class_ended',
+        class_session_id: session.id,
+        message: `How was '${session.classes?.title}'? Confirm you attended and leave a review.`,
+      }))
+      if (!rows.length) continue
+      const { error } = await supabase.from('notifications').insert(rows)
+      if (error) { console.error('[CLASS_ENDED] Could not save notifications', error.message); continue }
+      pushNotifications(rows)
+      sent += rows.length
+    } catch (e) {
+      console.error('[CLASS_ENDED] Failed to process session', session.id, e.message)
+    }
+  }
+  return sent
+}
+
+module.exports = { computeStartingSoonWindow, computeLiveWindow, isRecentlyEnded, sendStartingSoonNotifications, sendLiveNotifications, sendEndedNotifications }

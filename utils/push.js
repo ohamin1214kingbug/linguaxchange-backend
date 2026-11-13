@@ -19,6 +19,8 @@ if (enabled) webpush.setVapidDetails('mailto:gongbuleng.team@gmail.com', PUBLIC_
 function pushUrl(row) {
   if (row.type === 'class_started' && row.class_session_id) return `/classroom/${row.class_session_id}`
   if (row.type === 'request_fulfilled') return '/classes'
+  // The dashboard's to-do card holds the confirm and review buttons.
+  if (row.type === 'class_ended') return '/dashboard#todo'
   return '/dashboard'
 }
 
