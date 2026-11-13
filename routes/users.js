@@ -88,6 +88,22 @@ router.get('/search', requireAuth, publicGetLimiter, async (req, res) => {
   }
 })
 
+// GET /api/users/me — the signed-in member's own profile, with the
+// owner-only fields (learning levels, certificate name, phone status).
+// The profile page used to load the public /:id view, which lacks them, so
+// saved learning levels looked empty after a reload and saving again would
+// have erased them. Declared above /:id, which would otherwise take "me".
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('users').select(USER_FIELDS).eq('id', req.userId).single()
+    if (error || !data) return fail(res, 404, 'User not found', error)
+    const badges = await getEarnedBadges(req.userId)
+    res.json({ ...data, badges })
+  } catch (e) {
+    res.status(500).json({ error: 'Could not fetch your profile' })
+  }
+})
+
 router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
