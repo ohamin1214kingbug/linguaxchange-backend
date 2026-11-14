@@ -9,6 +9,10 @@ const { isSessionFullError } = require('../utils/enrollmentCapacity')
 const { fail } = require('../utils/failure')
 const { notifyTeachersOfRequest } = require('../utils/requestAlerts')
 const { pushNotifications } = require('../utils/push')
+const { sendEmail } = require('../utils/mailer')
+const { renderEmail } = require('../utils/emailTemplate')
+const { formatSessionTime } = require('../utils/classReminder')
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -274,6 +278,12 @@ router.post('/:id/fulfill', requireAuth, async (req, res) => {
     await supabase.from('notifications').insert(rows)
     pushNotifications(rows)
 
+    // The student who asked also gets an email (owner request, 2026-11-14):
+    // a request can sit for up to a day, and the bell is easy to miss.
+    // After the response is decided, never failing the fulfilment itself.
+    emailRequester(request, cls, firstSession, enrolled)
+      .catch(e => console.error('[REQUEST_FULFILL] email failed', e.message))
+
     res.json({ success: true, notified: userIds.length, requesterEnrolled: enrolled })
   } catch (e) {
     console.error(e)
@@ -281,4 +291,37 @@ router.post('/:id/fulfill', requireAuth, async (req, res) => {
   }
 })
 
+// Pure: what the requester is told. Exported for its test.
+function requestAnsweredEmail({ firstName, topic, title, when, enrolled, classId }) {
+  return {
+    subject: `A teacher answered your request: ${topic}`,
+    ...renderEmail({
+      heading: 'A teacher answered your request',
+      paragraphs: [
+        `Hi ${firstName || 'there'}, someone is teaching what you asked for: "${topic}".`,
+        enrolled
+          ? 'You are already in the class, paid with the banana from your request.'
+          : 'The class is open now. Join it before the places go.',
+      ],
+      box: [['Class:', title], ...(when ? [['Starts:', when]] : [])],
+      button: { label: enrolled ? 'See the class' : 'Join the class', url: `${FRONTEND_URL}/classes/${classId}` },
+    }),
+  }
+}
+
+async function emailRequester(request, cls, firstSession, enrolled) {
+  const { data: student } = await supabase
+    .from('users')
+    .select('email, first_name, timezone, time_format')
+    .eq('id', request.student_id)
+    .single()
+  if (!student?.email) return
+  const when = firstSession ? formatSessionTime(firstSession.session_date, student.timezone, student.time_format).display : null
+  await sendEmail({
+    to: student.email,
+    ...requestAnsweredEmail({ firstName: student.first_name, topic: request.topic, title: cls.title, when, enrolled, classId: cls.id }),
+  })
+}
+
 module.exports = router
+module.exports.requestAnsweredEmail = requestAnsweredEmail
