@@ -29,6 +29,8 @@ async function targets() {
   if (error) throw error
   const list = []
   for (const t of teachers) {
+    // Some profiles saved an empty string rather than null.
+    if (!t.teach_language?.trim()) continue
     const d = await teachDemand(t.teach_language, t.id)
     if (shouldNudge({ prefs: t.notification_preferences, sentAt: t.teach_nudge_sent_at, ownUpcoming: d.own_upcoming, learners: d.learners, upcoming: d.upcoming })) {
       list.push({ ...t, ...d })
