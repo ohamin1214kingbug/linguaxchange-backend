@@ -115,9 +115,14 @@ router.get('/:id/roster', requireAuth, async (req, res) => {
     const { data: enrollments } = sessionIds.length
       ? await supabase
           .from('class_enrollments')
-          .select('class_session_id, status, attended, student:users!user_id(id, first_name, last_name, photo_url, learn_details)')
+          .select('class_session_id, status, attended, no_show_at, student:users!user_id(id, first_name, last_name, photo_url, learn_details)')
           .in('class_session_id', sessionIds)
       : { data: [] }
+    // Who opened the room, for "joined / never joined" after class.
+    const { data: joins } = sessionIds.length
+      ? await supabase.from('room_joins').select('session_id, user_id').in('session_id', sessionIds)
+      : { data: [] }
+    const joined = new Set((joins || []).map(j => `${j.session_id}|${j.user_id}`))
 
     res.json({
       max_students: cls.max_students,
@@ -125,7 +130,7 @@ router.get('/:id/roster', requireAuth, async (req, res) => {
         ...s,
         students: (enrollments || [])
           .filter(e => e.class_session_id === s.id)
-          .map(e => ({ ...e.student, status: e.status, attended: e.attended }))
+          .map(e => ({ ...e.student, status: e.status, attended: e.attended, no_show: Boolean(e.no_show_at), joined: joined.has(`${e.class_session_id}|${e.student?.id}`) }))
       }))
     })
   } catch (e) {
@@ -172,6 +177,12 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   try {
+    // Two missed classes in 30 days pause posting new ones (utils/noShow.js).
+    const { data: limits } = await supabase.from('users').select('teaching_paused_until').eq('id', req.userId).single()
+    if (limits?.teaching_paused_until && new Date(limits.teaching_paused_until) > new Date()) {
+      return res.status(403).json({ error: `You missed classes you were teaching, so you can post new classes again on ${limits.teaching_paused_until.slice(0, 10)}.` })
+    }
+
     const teacherIsApproved = await getTeacherIsApproved(req.userId)
 
     const { data: cls, error } = await supabase
