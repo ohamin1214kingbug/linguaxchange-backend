@@ -8,9 +8,10 @@
 -- cannot notify twice.
 ALTER TABLE class_sessions ADD COLUMN IF NOT EXISTS ended_notified_at TIMESTAMPTZ;
 
--- notifications.type is a closed CHECK list.
+-- notifications.type is a closed CHECK list. It includes 'chat_message'
+-- (add_class_chat.sql) so running this after that one does not remove it.
 ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
 ALTER TABLE notifications ADD CONSTRAINT notifications_type_check
   CHECK (type IN ('student_joined', 'class_starting_soon', 'class_started',
                   'request_fulfilled', 'credit_added', 'assignment_answered',
-                  'account_approved', 'class_ended'));
+                  'account_approved', 'class_ended', 'chat_message'));
