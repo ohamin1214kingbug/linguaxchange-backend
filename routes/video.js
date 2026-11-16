@@ -19,7 +19,7 @@ router.post('/room', requireAuth, async (req, res) => {
   try {
     const { data: session, error: sessionError } = await supabase
       .from('class_sessions')
-      .select('id, session_date, classes(id, teacher_id, title, duration_minutes)')
+      .select('id, session_date, classes(id, teacher_id, title, duration_minutes, description, materials, lesson_plan_url, level, language_code)')
       .eq('id', class_session_id)
       .single()
 
@@ -75,7 +75,7 @@ router.post('/room', requireAuth, async (req, res) => {
     // link to a profile.
     const { data: enrolled } = await supabase
       .from('class_enrollments')
-      .select('user_id, users(id, first_name, last_name)')
+      .select('user_id, status, users(id, first_name, last_name, learn_details)')
       .eq('class_session_id', class_session_id)
 
     const { data: teacher } = await supabase
@@ -84,13 +84,7 @@ router.post('/room', requireAuth, async (req, res) => {
       .eq('id', session.classes.teacher_id)
       .single()
 
-    const participants = [
-      ...(teacher ? [{ ...teacher, role: 'teacher' }] : []),
-      ...(enrolled || [])
-        .map(e => e.users)
-        .filter(Boolean)
-        .map(u => ({ ...u, role: 'student' }))
-    ].filter(p => p.id !== req.userId)
+    const participants = roomParticipants({ teacher, enrolled, isTeacher, userId: req.userId })
 
     const room = buildRoomName(class_session_id, process.env.JWT_SECRET)
     const displayName = `${user?.first_name || 'User'} ${user?.last_name || ''}`.trim()
@@ -112,7 +106,11 @@ router.post('/room', requireAuth, async (req, res) => {
       displayName,
       topic: session.classes.title,
       isTeacher,
-      participants
+      participants,
+      // For the info panel beside the video: everyone here may already see
+      // these on the class page.
+      classInfo: (({ id, title, description, materials, lesson_plan_url, level, language_code, duration_minutes }) =>
+        ({ id, title, description, materials, lesson_plan_url, level, language_code, duration_minutes }))(session.classes)
     })
   } catch (e) {
     console.error(e)
@@ -120,4 +118,19 @@ router.post('/room', requireAuth, async (req, res) => {
   }
 })
 
+// Pure: who else is in the room. Cancelled places are left out. A
+// student's level and note are for the teacher to pitch the class;
+// classmates get names only.
+function roomParticipants({ teacher, enrolled, isTeacher, userId }) {
+  return [
+    ...(teacher ? [{ ...teacher, role: 'teacher' }] : []),
+    ...(enrolled || [])
+      .filter(e => e.status !== 'cancelled')
+      .map(e => e.users)
+      .filter(Boolean)
+      .map(({ learn_details, ...u }) => ({ ...u, role: 'student', ...(isTeacher ? { learn_details } : {}) })),
+  ].filter(p => p.id !== userId)
+}
+
 module.exports = router
+module.exports.roomParticipants = roomParticipants
