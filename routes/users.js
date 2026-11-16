@@ -104,6 +104,54 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 })
 
+// The photo on the member's Google account, for the welcome flow's "Use my
+// Google photo". Only Google's own image host is fetched, at 400px.
+async function googlePhotoUrl(userId) {
+  const { data: me } = await supabase.from('users').select('google_id').eq('id', userId).single()
+  if (!me?.google_id) return null
+  const { data } = await supabase.auth.admin.getUserById(me.google_id)
+  const raw = data?.user?.user_metadata?.avatar_url || data?.user?.user_metadata?.picture
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:' || !url.hostname.endsWith('.googleusercontent.com')) return null
+    return url.href.replace(/=s\d+(-c)?$/, '=s400-c')
+  } catch {
+    return null
+  }
+}
+
+// GET /api/users/me/google-photo — { url } to preview, or 404.
+router.get('/me/google-photo', requireAuth, async (req, res) => {
+  try {
+    const url = await googlePhotoUrl(req.userId)
+    if (!url) return res.status(404).json({ error: 'No Google photo' })
+    res.json({ url })
+  } catch (e) {
+    fail(res, 500, 'Could not load your Google photo', e)
+  }
+})
+
+// POST /api/users/me/google-photo — copies it into our storage as the
+// member's photo (Google's link can change; ours doesn't).
+router.post('/me/google-photo', requireAuth, async (req, res) => {
+  try {
+    const url = await googlePhotoUrl(req.userId)
+    if (!url) return res.status(404).json({ error: 'No Google photo' })
+    const response = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    if (!response.ok) return res.status(502).json({ error: 'Could not fetch your Google photo' })
+    const buffer = Buffer.from(await response.arrayBuffer())
+    const type = response.headers.get('content-type') || 'image/jpeg'
+    const decoded = decodeImage(`data:${type};base64,${buffer.toString('base64')}`, { maxBytes: MAX_AVATAR_BYTES })
+    if (!decoded.ok) return res.status(400).json({ error: decoded.error })
+    const { data, error } = await storeAvatar(req.userId, decoded)
+    if (error) return fail(res, 400, 'Could not save your Google photo', error)
+    res.json(data)
+  } catch (e) {
+    fail(res, 500, 'Could not save your Google photo', e)
+  }
+})
+
 router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -132,6 +180,20 @@ const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 // Uploads through the service-role key instead of the frontend hitting
 // Supabase Storage directly, so the storage.objects policies don't need to
 // stay open to the public anon key just for logged-in users to upload.
+// Saves a decoded image as the member's photo and returns their profile.
+async function storeAvatar(userId, decoded) {
+  const path = `avatars/${userId}.${decoded.ext}`
+  const { error: uploadError } = await supabase.storage
+    .from('avatars')
+    .upload(path, decoded.buffer, { contentType: decoded.mime, upsert: true })
+  if (uploadError) return { error: uploadError }
+  const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
+  // Versioned: the path stays the same when the photo changes, so caches
+  // would otherwise keep the old one.
+  return supabase.from('users').update({ photo_url: `${publicUrl}?v=${Date.now()}` })
+    .eq('id', userId).select(USER_FIELDS).single()
+}
+
 router.post('/:id/avatar', requireAuth, async (req, res) => {
   if (req.userId !== parseInt(req.params.id)) {
     return res.status(403).json({ error: 'You can only edit your own profile' })
@@ -143,23 +205,8 @@ router.post('/:id/avatar', requireAuth, async (req, res) => {
   const decoded = decodeImage(req.body.image, { maxBytes: MAX_AVATAR_BYTES })
   if (!decoded.ok) return res.status(400).json({ error: decoded.error })
 
-  const path = `avatars/${req.userId}.${decoded.ext}`
-
   try {
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(path, decoded.buffer, { contentType: decoded.mime, upsert: true })
-    if (uploadError) return fail(res, 400, 'Could not upload avatar', uploadError)
-
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
-
-    const { data, error } = await supabase
-      .from('users')
-      .update({ photo_url: publicUrl })
-      .eq('id', req.userId)
-      .select(USER_FIELDS)
-      .single()
-
+    const { data, error } = await storeAvatar(req.userId, decoded)
     if (error) return fail(res, 400, 'Could not upload avatar', error)
     res.json(data)
   } catch (e) {
