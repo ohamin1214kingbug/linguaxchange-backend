@@ -22,7 +22,7 @@ router.use(requireAuth, requireAdmin)
 
 // Explicit allowlist rather than select('*') — excludes password_hash and
 // reset_token/reset_token_expires, which have no reason to leave the DB.
-const ADMIN_USER_COLUMNS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, is_approved, approval_reason, current_streak, longest_streak, timezone, phone_number, phone_verified, google_id, created_at, suspended_until, suspension_reason, deleted_at'
+const ADMIN_USER_COLUMNS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, teaching_paused_until, booking_limited_until, is_approved, approval_reason, current_streak, longest_streak, timezone, phone_number, phone_verified, google_id, created_at, suspended_until, suspension_reason, deleted_at'
 
 router.get('/users', async (req, res) => {
   try {
@@ -97,6 +97,20 @@ router.delete('/users/:id/certificate', async (req, res) => {
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not remove the certificate' })
+  }
+})
+
+// POST /api/admin/users/:id/lift-no-show — the member disputed a no-show
+// and the admin agrees: lift both limits and undo the strikes. Refunds and
+// cancellations that already happened stay as they are.
+router.post('/users/:id/lift-no-show', async (req, res) => {
+  try {
+    const { error } = await supabase.from('users').update({ teaching_paused_until: null, booking_limited_until: null }).eq('id', req.params.id)
+    if (error) return fail(res, 400, 'Could not lift the limits', error)
+    await supabase.from('no_show_events').update({ undone_at: new Date().toISOString() }).eq('user_id', req.params.id).is('undone_at', null)
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ error: 'Could not lift the limits' })
   }
 })
 

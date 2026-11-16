@@ -6,6 +6,7 @@ const { refundExpiredRequests } = require('../utils/requestCredits')
 const { releaseDueFeedback, refundExpiredAssignments } = require('../utils/assignmentCredits')
 const { releaseDueAttendancePayouts } = require('../utils/attendancePayout')
 const { completeFinishedClasses } = require('../utils/classCompletion')
+const { runNoShowChecks } = require('../utils/noShow')
 const { runHealthChecks } = require('../utils/healthChecks')
 const { recordRun, REMINDER_JOB } = require('../utils/cronHeartbeat')
 
@@ -24,6 +25,9 @@ async function handleSendReminders(req, res) {
   const startingSoonNotified = await sendStartingSoonNotifications()
   const liveNotified = await sendLiveNotifications()
   const endedNotified = await sendEndedNotifications()
+  // Before the payout sweep: a teacher no-show cancels the session, which
+  // keeps it out of payouts.
+  const noShows = await runNoShowChecks()
   // Posting a request costs a credit; one nobody answered has to give it
   // back. Runs on this tick rather than its own schedule so there's no
   // second pinger to configure — the work is a cheap indexed lookup that
@@ -50,7 +54,7 @@ async function handleSendReminders(req, res) {
   await recordRun(REMINDER_JOB)
 
   res.json({
-    ...summary, startingSoonNotified, liveNotified, endedNotified, requestsRefunded,
+    ...summary, startingSoonNotified, liveNotified, endedNotified, noShows, requestsRefunded,
     feedbackReleased, assignmentsRefunded, attendancePaid, classesCompleted,
   })
 }

@@ -38,6 +38,20 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: "You can't join your own class" })
     }
 
+    // Three missed classes in 30 days: one booked class at a time for 14
+    // days (utils/noShow.js).
+    const { data: limits } = await supabase.from('users').select('booking_limited_until').eq('id', user_id).single()
+    if (limits?.booking_limited_until && new Date(limits.booking_limited_until) > new Date()) {
+      const { data: upcoming } = await supabase.from('class_enrollments')
+        .select('id, class_sessions!inner(session_date)')
+        .eq('user_id', user_id).eq('status', 'confirmed')
+        .gt('class_sessions.session_date', new Date().toISOString())
+        .limit(1)
+      if (upcoming?.length) {
+        return res.status(403).json({ error: `You missed several classes you booked, so until ${limits.booking_limited_until.slice(0, 10)} you can book one class at a time.` })
+      }
+    }
+
     const { data: credit } = await supabase
       .from('credits')
       .select('balance')

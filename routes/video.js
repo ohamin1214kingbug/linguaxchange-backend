@@ -1,5 +1,6 @@
 const express = require('express')
 const router = express.Router()
+const { recordJoin } = require('../utils/noShow')
 const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { buildRoomName } = require('../utils/roomName')
@@ -52,6 +53,9 @@ router.post('/room', requireAuth, async (req, res) => {
     if (!window.ok) {
       return res.status(403).json({ error: window.error, opens_at: window.opensAt || null })
     }
+
+    // Who actually came: the no-show rules (utils/noShow.js) read this.
+    recordJoin(session.id, req.userId)
 
     const { data: user } = await supabase
       .from('users')
