@@ -10,8 +10,9 @@
 const { FRONTEND_URL } = require('./frontendUrl')
 
 // Served by the frontend from public/email/header.png. An absolute URL on
-// our own domain: mail apps cannot load relative paths.
-const HEADER_URL = `${FRONTEND_URL}/email/header.png`
+// our own domain: mail apps cannot load relative paths. Bump ?v= when the
+// picture changes: Gmail caches images by URL.
+const HEADER_URL = `${FRONTEND_URL}/email/header.png?v=2`
 const CONTACT = 'gongbuleng.team@gmail.com'
 const NAVY = '#1a1a2e', RED = '#da1f33', CREAM = '#fdf3e7'
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
