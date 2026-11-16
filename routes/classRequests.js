@@ -19,7 +19,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 )
 
-const SELECT = '*, student:users!student_id(id, first_name, last_name, photo_url), class_request_interest(user_id)'
+const SELECT = '*, student:users!student_id(id, first_name, last_name, photo_url), class_request_interest(user_id), request_offers(teacher_id)'
 
 // Loads a request only while it's still answerable — open and unexpired.
 // Expiry is enforced on read rather than by a cleanup job: nothing looks at
