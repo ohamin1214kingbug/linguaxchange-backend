@@ -7,7 +7,8 @@ const WEEKS_SHOWN = 8
 // A profile is done when the member can be matched: a photo, a language
 // they teach and at least one they learn.
 function isProfileDone(u) {
-  return Boolean(u.photo_url && u.teach_language && (u.learn_languages || []).length)
+  // Blank strings count as missing: some profiles saved '' instead of null.
+  return Boolean(u.photo_url && u.teach_language?.trim() && (u.learn_languages || []).some(Boolean))
 }
 
 // Monday of the UTC week, as YYYY-MM-DD.
