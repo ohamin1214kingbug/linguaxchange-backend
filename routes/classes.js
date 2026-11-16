@@ -14,6 +14,7 @@ const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { decodePdf } = require('../utils/pdfUpload')
 const { fail } = require('../utils/failure')
 const { notifyClassAlerts } = require('../utils/classAlerts')
+const { teachDemand } = require('../utils/teachNudge')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -64,6 +65,19 @@ router.get('/', publicGetLimiter, async (req, res) => {
     res.json(req.query.teacher_id ? sorted : sorted.filter(cls => hasUpcomingSession(cls)))
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch classes' })
+  }
+})
+
+// GET /api/classes/teach-demand — for the dashboard's "people want to learn
+// your language" card: other members learning the language this member
+// teaches, and the classes in it coming up (utils/teachNudge.js).
+router.get('/teach-demand', requireAuth, async (req, res) => {
+  try {
+    const { data: me } = await supabase.from('users').select('teach_language').eq('id', req.userId).single()
+    if (!me?.teach_language) return res.json({ language_code: null })
+    res.json({ language_code: me.teach_language, ...await teachDemand(me.teach_language, req.userId) })
+  } catch (e) {
+    fail(res, 500, 'Could not load teaching demand', e)
   }
 })
 
@@ -139,11 +153,30 @@ router.get('/:id/roster', requireAuth, async (req, res) => {
   }
 })
 
+// Copies a teacher's own class PDF onto their new class. Null when there is
+// nothing to copy or it fails: the class is created either way.
+async function copyLessonPdf(sourceId, cls, userId) {
+  try {
+    const { data: src } = await supabase.from('classes').select('id, teacher_id, lesson_plan_url').eq('id', sourceId).maybeSingle()
+    if (!src?.lesson_plan_url || src.teacher_id !== userId) return null
+    const to = `class-${cls.id}.pdf`
+    const { error } = await supabase.storage.from(CLASS_MATERIALS_BUCKET).copy(`class-${src.id}.pdf`, to)
+    if (error) { console.error('[COPY_PDF]', error.message); return null }
+    const { data: { publicUrl } } = supabase.storage.from(CLASS_MATERIALS_BUCKET).getPublicUrl(to)
+    const { data } = await supabase.from('classes').update({ lesson_plan_url: `${publicUrl}?v=${Date.now()}` }).eq('id', cls.id).select().single()
+    return data
+  } catch (e) {
+    console.error('[COPY_PDF]', e.message)
+    return null
+  }
+}
+
 router.post('/', requireAuth, async (req, res) => {
   const {
     language_code, level, topic,
     title, description, max_students, duration_minutes,
-    format, recurrence_type, recurrence_end_date, materials, scheduled_at, meeting_link
+    format, recurrence_type, recurrence_end_date, materials, scheduled_at, meeting_link,
+    copy_pdf_from
   } = req.body
 
   if (!language_code || !level || !topic || !title) {
@@ -242,7 +275,9 @@ router.post('/', requireAuth, async (req, res) => {
       return fail(res, 400, 'Could not schedule the class sessions', sessionError)
     }
 
-    res.status(201).json({ ...cls, sessionCount: sessionDates.length })
+    // "Teach it again" reuses the PDF of the class it was copied from.
+    const created = (copy_pdf_from && await copyLessonPdf(copy_pdf_from, cls, req.userId)) || cls
+    res.status(201).json({ ...created, sessionCount: sessionDates.length })
     // After the response: the teacher shouldn't wait on other members' email.
     if (cls.status === 'approved') notifyClassAlerts(cls)
   } catch (e) {

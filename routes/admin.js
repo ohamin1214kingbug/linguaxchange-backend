@@ -9,6 +9,7 @@ const { sendEmail } = require('../utils/mailer')
 const { renderEmail, CONTACT } = require('../utils/emailTemplate')
 const { approveMember } = require('../utils/memberApproval')
 const { deleteAccount } = require('../utils/deleteAccount')
+const { buildGrowth } = require('../utils/growth')
 const { cancelTeacherClasses } = require('../utils/classCancellation')
 const { pushNotifications } = require('../utils/push')
 const { certificatePaths, CERTIFICATE_BUCKET } = require('../utils/certificateUpload')
@@ -23,6 +24,31 @@ router.use(requireAuth, requireAdmin)
 // Explicit allowlist rather than select('*') — excludes password_hash and
 // reset_token/reset_token_expires, which have no reason to leave the DB.
 const ADMIN_USER_COLUMNS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, teaching_paused_until, booking_limited_until, is_approved, approval_reason, current_streak, longest_streak, timezone, phone_number, phone_verified, google_id, created_at, suspended_until, suspension_reason, deleted_at'
+
+// GET /api/admin/growth — the Growth tab: how far members get, per week of
+// sign-up, and classes vs learners per language (utils/growth.js).
+// ponytail: loads every member and booking; fine for hundreds of members,
+// move the counting into SQL past a few thousand.
+router.get('/growth', async (req, res) => {
+  try {
+    const now = new Date()
+    const [users, enrollments, classes, upcoming] = await Promise.all([
+      supabase.from('users').select('id, created_at, photo_url, teach_language, learn_languages').is('deleted_at', null),
+      supabase.from('class_enrollments').select('user_id, status, attended'),
+      supabase.from('classes').select('teacher_id, status'),
+      supabase.from('class_sessions').select('id, classes!inner(language_code, status)')
+        .eq('classes.status', 'approved').neq('status', 'cancelled').gt('session_date', now.toISOString()),
+    ])
+    const failed = [users, enrollments, classes, upcoming].find(r => r.error)
+    if (failed) return fail(res, 400, 'Could not load growth numbers', failed.error)
+    res.json(buildGrowth({
+      users: users.data, enrollments: enrollments.data, classes: classes.data,
+      upcoming: upcoming.data.map(s => ({ language_code: s.classes.language_code })), now,
+    }))
+  } catch (e) {
+    fail(res, 500, 'Could not load growth numbers', e)
+  }
+})
 
 router.get('/users', async (req, res) => {
   try {
