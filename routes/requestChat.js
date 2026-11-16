@@ -4,7 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { chatPostLimiter } = require('../middleware/rateLimit')
 const { cleanMessage } = require('../utils/chatAccess')
-const { extendedExpiry, requestChatAccess } = require('../utils/requestChat')
+const { extendedExpiry, requestChatAccess, acceptTime } = require('../utils/requestChat')
 const { pushNotifications } = require('../utils/push')
 const { sendEmail } = require('../utils/mailer')
 const { renderEmail } = require('../utils/emailTemplate')
@@ -61,9 +61,10 @@ async function notify(thread, fromId, type, message, { dedupe = false } = {}) {
   else pushNotifications(rows)
 }
 
-const toMessage = (row, teacherIds) => ({
+const toMessage = (row, thread) => ({
   id: row.id, body: row.body, created_at: row.created_at, proposed_time: row.proposed_time,
-  user_id: row.user_id, first_name: row.users?.first_name || '', is_teacher: teacherIds.includes(row.user_id),
+  user_id: row.user_id, first_name: row.users?.first_name || '',
+  is_teacher: thread.teacherIds.includes(row.user_id), is_requester: row.user_id === thread.request.student_id,
 })
 
 // GET /api/requests/:id/chat?after=<message id>
@@ -84,7 +85,7 @@ router.get('/:id/chat', requireAuth, async (req, res) => {
       request: { ...request, student_first_name: student?.first_name || '' },
       open: thread.open, is_requester: thread.isRequester, is_teacher: thread.isTeacher,
       teachers: thread.offers.map(o => ({ id: o.teacher_id, first_name: o.teacher?.first_name || '' })),
-      messages: (data || []).map(r => toMessage(r, thread.teacherIds)),
+      messages: (data || []).map(r => toMessage(r, thread)),
     })
   } catch (e) {
     console.error('[REQUEST_CHAT]', e.message)
@@ -141,7 +142,8 @@ async function emailRequester(request, teacherName) {
   await sendEmail({ to: request.student.email, ...offerEmail({ firstName: request.student.first_name, teacherName, topic: request.topic, requestId: request.id }) })
 }
 
-// POST /api/requests/:id/chat — a message; a teacher may attach a proposed time.
+// POST /api/requests/:id/chat — a message; the student who asked or a
+// teacher who offered may attach a suggested time.
 router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
   const body = cleanMessage(req.body?.body)
   if (!body) return res.status(400).json({ error: 'Write a message of up to 500 characters' })
@@ -151,7 +153,7 @@ router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
     if (!thread.open) return res.status(403).json({ error: 'This chat has closed' })
     let proposed_time = null
     if (req.body?.proposed_time) {
-      if (!thread.isTeacher) return res.status(403).json({ error: 'Only a teacher who offered can propose a time' })
+      if (!thread.isTeacher && !thread.isRequester) return res.status(403).json({ error: 'Only the student who asked or a teacher who offered can suggest a time' })
       const when = new Date(req.body.proposed_time)
       if (isNaN(when) || when <= new Date()) return res.status(400).json({ error: 'Propose a time in the future' })
       proposed_time = when.toISOString()
@@ -161,7 +163,7 @@ router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
       .select('id, body, created_at, proposed_time, user_id, users(first_name)').single()
     if (error) return fail(res, 400, 'Could not send the message', error)
     if (thread.isTeacher) await holdClock(thread.request)
-    res.status(201).json(toMessage(data, thread.teacherIds))
+    res.status(201).json(toMessage(data, thread))
     notify(thread, req.userId, 'request_chat', `${data.users?.first_name || 'Someone'} wrote about '${thread.request.topic}'`, { dedupe: true })
       .catch(e => console.error('[REQUEST_CHAT_NOTIFY]', e.message))
   } catch (e) {
@@ -171,23 +173,28 @@ router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
 })
 
 // POST /api/requests/:id/accept {message_id} — the student accepts a
-// teacher's proposed time. The teacher then creates the class at that time.
+// teacher's suggested time, or a teacher accepts the student's. The agreed
+// teacher then creates the class at that time.
 router.post('/:id/accept', requireAuth, async (req, res) => {
   try {
     const thread = await loadRequest(req.params.id, req.userId)
-    if (!thread?.isRequester) return res.status(403).json({ error: 'Only the student who asked can accept a time' })
+    if (!thread?.allowed) return res.status(403).json({ error: 'You are not part of this request' })
     if (!thread.open) return res.status(403).json({ error: 'This chat has closed' })
     const { data: msg } = await supabase.from('chat_messages')
       .select('id, user_id, proposed_time')
       .eq('id', req.body?.message_id).eq('thread_type', 'request').eq('thread_id', thread.request.id)
       .is('deleted_at', null).maybeSingle()
-    if (!msg?.proposed_time || !thread.teacherIds.includes(msg.user_id)) return res.status(400).json({ error: 'That is not a time a teacher proposed' })
+    if (!msg?.proposed_time) return res.status(400).json({ error: 'That is not a suggested time' })
+    const rule = acceptTime({ proposerId: msg.user_id, accepterId: req.userId, studentId: thread.request.student_id, teacherIds: thread.teacherIds })
+    if (!rule.ok) return res.status(403).json({ error: rule.error })
     const { error } = await supabase.from('class_requests')
-      .update({ agreed_time: msg.proposed_time, agreed_teacher_id: msg.user_id })
+      .update({ agreed_time: msg.proposed_time, agreed_teacher_id: rule.agreedTeacherId })
       .eq('id', thread.request.id)
     if (error) return fail(res, 400, 'Could not accept the time', error)
-    res.json({ success: true, agreed_time: msg.proposed_time, agreed_teacher_id: msg.user_id })
-    notify(thread, req.userId, 'request_chat', `A time was agreed for '${thread.request.topic}'. Create the class.`)
+    res.json({ success: true, agreed_time: msg.proposed_time, agreed_teacher_id: rule.agreedTeacherId })
+    notify(thread, req.userId, 'request_chat', rule.agreedTeacherId === req.userId
+      ? `A time was agreed for '${thread.request.topic}'.`
+      : `A time was agreed for '${thread.request.topic}'. Create the class.`)
       .catch(e => console.error('[REQUEST_ACCEPT]', e.message))
   } catch (e) {
     res.status(500).json({ error: 'Could not accept the time' })

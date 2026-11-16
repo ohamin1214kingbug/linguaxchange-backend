@@ -26,4 +26,21 @@ function requestChatAccess({ userId, request, interestedIds = [], teacherIds = [
   return { allowed, open, isRequester, isTeacher }
 }
 
-module.exports = { extendedExpiry, requestChatAccess, MAX_OPEN_MS }
+// Who may accept a suggested time. The student who asked accepts a time a
+// teacher suggested; a teacher who offered accepts a time the student
+// suggested. Either way the agreed teacher is the teacher in that pair.
+function acceptTime({ proposerId, accepterId, studentId, teacherIds = [] }) {
+  if (teacherIds.includes(proposerId)) {
+    return accepterId === studentId
+      ? { ok: true, agreedTeacherId: proposerId }
+      : { ok: false, error: "Only the student who asked can accept a teacher's time" }
+  }
+  if (proposerId === studentId) {
+    return teacherIds.includes(accepterId)
+      ? { ok: true, agreedTeacherId: accepterId }
+      : { ok: false, error: "Only a teacher who offered can accept the student's time" }
+  }
+  return { ok: false, error: 'That is not a suggested time' }
+}
+
+module.exports = { extendedExpiry, requestChatAccess, acceptTime, MAX_OPEN_MS }
