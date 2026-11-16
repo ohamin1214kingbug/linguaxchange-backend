@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth } = require('../middleware/auth')
 const { chatPostLimiter } = require('../middleware/rateLimit')
 const { chatAccess, cleanMessage } = require('../utils/chatAccess')
+const { buildInbox } = require('../utils/chatInbox')
 const { pushNotifications } = require('../utils/push')
 const { fail } = require('../utils/failure')
 
@@ -70,6 +71,62 @@ router.get('/session/:id', requireAuth, async (req, res) => {
   } catch (e) {
     console.error('[CHAT]', e.message)
     res.status(500).json({ error: 'Could not load the chat' })
+  }
+})
+
+const HOUR_MS = 60 * 60 * 1000
+
+// GET /api/chat/mine — every chat this member can write in right now, with
+// its newest message, for the dashboard's "Chats" panel (utils/chatInbox.js
+// decides what is open and the order).
+router.get('/mine', requireAuth, async (req, res) => {
+  try {
+    const uid = req.userId
+    const now = new Date()
+    // ponytail: a chat stays open 24h after the class ends; assumes classes
+    // last at most 4h. Taught sessions only for the next 7 days, so weekly
+    // recurring classes do not flood the list.
+    const since = new Date(now.getTime() - 28 * HOUR_MS).toISOString()
+    const weekAhead = new Date(now.getTime() + 7 * 24 * HOUR_MS).toISOString()
+    const SESSION = 'id, session_date, status, classes!inner(id, title, teacher_id, duration_minutes)'
+    const [booked, taught, offers, interest] = await Promise.all([
+      supabase.from('class_enrollments').select(`status, class_sessions!inner(${SESSION})`)
+        .eq('user_id', uid).neq('status', 'cancelled').gte('class_sessions.session_date', since).limit(100),
+      supabase.from('class_sessions').select(SESSION)
+        .eq('classes.teacher_id', uid).neq('status', 'cancelled')
+        .gte('session_date', since).lte('session_date', weekAhead).limit(100),
+      supabase.from('request_offers').select('request_id').eq('teacher_id', uid),
+      supabase.from('class_request_interest').select('request_id').eq('user_id', uid),
+    ])
+    const failed = [booked, taught, offers, interest].find(r => r.error)
+    if (failed) return fail(res, 400, 'Could not load your chats', failed.error)
+
+    const joinedIds = [...new Set([...offers.data, ...interest.data].map(r => r.request_id))]
+    let requestQuery = supabase.from('class_requests').select('id, topic, student_id, expires_at, fulfilled_class_id')
+      .is('fulfilled_class_id', null).gt('expires_at', now.toISOString())
+    requestQuery = joinedIds.length
+      ? requestQuery.or(`student_id.eq.${uid},id.in.(${joinedIds.join(',')})`)
+      : requestQuery.eq('student_id', uid)
+    const { data: requests, error: requestError } = await requestQuery
+    if (requestError) return fail(res, 400, 'Could not load your chats', requestError)
+
+    const sessions = [
+      ...booked.data.map(e => ({ ...e.class_sessions, enrollmentStatus: e.status })),
+      ...taught.data,
+    ]
+    // ponytail: newest 300 messages per kind; a thread quiet for longer than
+    // that shows without a preview.
+    const newest = (type, ids) => ids.length
+      ? supabase.from('chat_messages').select('id, thread_type, thread_id, body, created_at, proposed_time, user_id, users(first_name)')
+        .eq('thread_type', type).in('thread_id', ids).is('deleted_at', null).order('id', { ascending: false }).limit(300)
+      : Promise.resolve({ data: [] })
+    const [sm, rm] = await Promise.all([newest('session', sessions.map(s => s.id)), newest('request', (requests || []).map(r => r.id))])
+    const messages = [...(sm.data || []), ...(rm.data || [])].sort((a, b) => b.id - a.id)
+
+    res.json({ chats: buildInbox({ userId: uid, sessions, requests: requests || [], messages, now }) })
+  } catch (e) {
+    console.error('[CHAT_MINE]', e.message)
+    res.status(500).json({ error: 'Could not load your chats' })
   }
 })
 

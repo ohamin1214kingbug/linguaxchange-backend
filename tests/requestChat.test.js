@@ -42,3 +42,20 @@ test('the offer email names the teacher and links to the chat', () => {
   expect(e.text).toContain('Hi Jiwoo, Hamin would like to teach "Kpop terms".')
   expect(e.text).toContain('https://gongbuleng.com/chat/request/7')
 })
+
+describe('acceptTime', () => {
+  const { acceptTime } = require('../utils/requestChat')
+  const base = { studentId: 1, teacherIds: [2, 3] }
+  test('the student accepts a teacher\'s time; that teacher is agreed', () => {
+    expect(acceptTime({ ...base, proposerId: 2, accepterId: 1 })).toEqual({ ok: true, agreedTeacherId: 2 })
+    expect(acceptTime({ ...base, proposerId: 2, accepterId: 3 }).ok).toBe(false)
+  })
+  test('a teacher who offered accepts the student\'s time and becomes the agreed teacher', () => {
+    expect(acceptTime({ ...base, proposerId: 1, accepterId: 3 })).toEqual({ ok: true, agreedTeacherId: 3 })
+    expect(acceptTime({ ...base, proposerId: 1, accepterId: 1 }).ok).toBe(false)
+    expect(acceptTime({ ...base, proposerId: 1, accepterId: 4 }).ok).toBe(false)
+  })
+  test('a time from someone who only pressed +1 cannot be accepted', () => {
+    expect(acceptTime({ ...base, proposerId: 4, accepterId: 1 }).ok).toBe(false)
+  })
+})
