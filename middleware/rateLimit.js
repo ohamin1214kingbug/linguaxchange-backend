@@ -106,4 +106,8 @@ const verifyEmailLimiter = [
   limiter(HOUR, 5, 'Too many verification emails requested. Please try again later.', { keyGenerator: req => `user|${req.userId}` }),
 ]
 
-module.exports = { keyGenerator, accountKey, phoneKey, loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, publicGetLimiter, verifyEmailLimiter }
+// Chat: generous for a conversation, tight enough to stop a flood. Per
+// account, so a whole campus behind one address is not one bucket.
+const chatPostLimiter = limiter(60 * 1000, 20, 'You are sending messages too fast. Wait a moment.', { keyGenerator: req => `user|${req.userId}` })
+
+module.exports = { chatPostLimiter, keyGenerator, accountKey, phoneKey, loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, publicGetLimiter, verifyEmailLimiter }
