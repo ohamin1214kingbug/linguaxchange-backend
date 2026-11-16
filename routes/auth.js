@@ -282,7 +282,8 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
         .insert([{ user_id: req.userId, balance: SIGNUP_CREDIT_GRANT }])
     }
 
-    res.json({ user: updated })
+    // `granted` lets the page say "3 bananas added" only when they were.
+    res.json({ user: updated, granted: existingCredit ? 0 : SIGNUP_CREDIT_GRANT })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not verify phone number' })

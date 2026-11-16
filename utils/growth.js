@@ -19,7 +19,7 @@ function weekOf(iso) {
   return d.toISOString().slice(0, 10)
 }
 
-// users: [{ id, created_at, photo_url, teach_language, learn_languages }]
+// users: [{ id, created_at, phone_verified, photo_url, teach_language, learn_languages }]
 // enrollments: [{ user_id, status, attended }]
 // classes: [{ teacher_id, status }]
 // upcoming: [{ language_code }] one per upcoming session
@@ -29,6 +29,7 @@ function buildGrowth({ users = [], enrollments = [], classes = [], upcoming = []
   const taught = new Set(classes.filter(c => c.status === 'approved' || c.status === 'completed').map(c => c.teacher_id))
   const steps = list => ({
     signedUp: list.length,
+    phoneVerified: list.filter(u => u.phone_verified).length,
     profileDone: list.filter(isProfileDone).length,
     booked: list.filter(u => booked.has(u.id)).length,
     attended: list.filter(u => attended.has(u.id)).length,

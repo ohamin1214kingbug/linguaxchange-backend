@@ -33,7 +33,7 @@ router.get('/growth', async (req, res) => {
   try {
     const now = new Date()
     const [users, enrollments, classes, upcoming] = await Promise.all([
-      supabase.from('users').select('id, created_at, photo_url, teach_language, learn_languages').is('deleted_at', null),
+      supabase.from('users').select('id, created_at, phone_verified, photo_url, teach_language, learn_languages').is('deleted_at', null),
       supabase.from('class_enrollments').select('user_id, status, attended'),
       supabase.from('classes').select('teacher_id, status'),
       supabase.from('class_sessions').select('id, classes!inner(language_code, status)')
