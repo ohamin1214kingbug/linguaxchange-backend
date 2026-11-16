@@ -47,6 +47,7 @@ const classAlertRoutes = require('./routes/classAlerts')
 const referralRoutes = require('./routes/referrals')
 const pushRoutes = require('./routes/push')
 const chatRoutes = require('./routes/chat')
+const requestChatRoutes = require('./routes/requestChat')
 
 const app = express()
 
@@ -132,6 +133,7 @@ app.use('/api/class-alerts', classAlertRoutes)
 app.use('/api/referrals', referralRoutes)
 app.use('/api/push', pushRoutes)
 app.use('/api/chat', chatRoutes)
+app.use('/api/requests', requestChatRoutes)
 
 // Oversized bodies get rejected by body-parser before any route handler
 // runs, and Express's default error page for that is an HTML stack trace —

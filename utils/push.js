@@ -22,6 +22,7 @@ function pushUrl(row) {
   // The dashboard's to-do card holds the confirm and review buttons.
   if (row.type === 'class_ended') return '/dashboard#todo'
   if (row.type === 'chat_message' && row.class_session_id) return `/chat/${row.class_session_id}`
+  if ((row.type === 'request_offer' || row.type === 'request_chat') && row.request_id) return `/chat/request/${row.request_id}`
   return '/dashboard'
 }
 
