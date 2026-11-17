@@ -5,6 +5,8 @@
 // Same router.handle() pattern as tests/assignmentAcknowledge.test.js.
 
 const mockFrom = jest.fn()
+const mockLog = jest.fn()
+jest.mock('../utils/adminLog', () => ({ logAdminAction: (...a) => mockLog(...a) }))
 jest.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ from: (...args) => mockFrom(...args) }),
 }))
@@ -66,6 +68,7 @@ test('approving an already-approved member sends nothing again', async () => {
   expect(res.body).toEqual({ success: true })
   expect(mockSendEmail).not.toHaveBeenCalled()
   expect(mockFrom).toHaveBeenCalledTimes(1)
+  expect(mockLog.mock.calls[0][1]).toBe('approve_member')
 })
 
 test('a failed notification insert still reports the approval as done', async () => {

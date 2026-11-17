@@ -15,6 +15,7 @@ const { decodePdf } = require('../utils/pdfUpload')
 const { fail } = require('../utils/failure')
 const { notifyClassAlerts } = require('../utils/classAlerts')
 const { teachDemand } = require('../utils/teachNudge')
+const { logAdminAction } = require('../utils/adminLog')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -334,6 +335,7 @@ router.post('/:id/approve', requireAuth, requireAdmin, async (req, res) => {
       }),
     })
 
+    await logAdminAction(req.userId, 'approve_class', { targetType: 'class', targetId: Number(req.params.id) })
     res.json({ success: true })
     notifyClassAlerts(cls)
   } catch (e) {
@@ -348,6 +350,7 @@ router.post('/:id/reject', requireAuth, requireAdmin, async (req, res) => {
       .update({ status: 'rejected' })
       .eq('id', req.params.id)
     if (error) return fail(res, 400, 'Could not reject class', error)
+    await logAdminAction(req.userId, 'reject_class', { targetType: 'class', targetId: Number(req.params.id) })
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not reject class' })

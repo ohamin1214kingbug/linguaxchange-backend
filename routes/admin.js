@@ -10,6 +10,8 @@ const { renderEmail, CONTACT } = require('../utils/emailTemplate')
 const { approveMember } = require('../utils/memberApproval')
 const { deleteAccount } = require('../utils/deleteAccount')
 const { buildGrowth } = require('../utils/growth')
+const { logAdminAction } = require('../utils/adminLog')
+const { loadDigest } = require('../utils/adminDigest')
 const { cancelTeacherClasses } = require('../utils/classCancellation')
 const { pushNotifications } = require('../utils/push')
 const { certificatePaths, CERTIFICATE_BUCKET } = require('../utils/certificateUpload')
@@ -24,6 +26,41 @@ router.use(requireAuth, requireAdmin)
 // Explicit allowlist rather than select('*') — excludes password_hash and
 // reset_token/reset_token_expires, which have no reason to leave the DB.
 const ADMIN_USER_COLUMNS = 'id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, teaching_paused_until, booking_limited_until, is_approved, approval_reason, current_streak, longest_streak, timezone, phone_number, phone_verified, google_id, created_at, suspended_until, suspension_reason, deleted_at'
+
+// GET /api/admin/actions?group=bananas|safety|private — the Activity tab,
+// newest first, with the admin's and the member's first names.
+const ACTION_GROUPS = {
+  bananas: ['give_bananas'],
+  safety: ['suspend', 'unsuspend', 'delete_member', 'lift_no_show', 'reject_member', 'reject_class'],
+  private: ['open_certificate', 'open_evidence', 'remove_certificate'],
+}
+router.get('/actions', async (req, res) => {
+  try {
+    let query = supabase.from('admin_actions')
+      .select('id, action, target_type, target_id, detail, created_at, admin:users!admin_id(first_name)')
+      .order('created_at', { ascending: false }).limit(200)
+    if (ACTION_GROUPS[req.query.group]) query = query.in('action', ACTION_GROUPS[req.query.group])
+    const { data, error } = await query
+    if (error) return fail(res, 400, 'Could not load the activity log', error)
+    const userIds = [...new Set(data.filter(a => a.target_type === 'user').map(a => a.target_id))]
+    const { data: people } = userIds.length
+      ? await supabase.from('users').select('id, first_name').in('id', userIds)
+      : { data: [] }
+    const names = Object.fromEntries((people || []).map(p => [p.id, p.first_name]))
+    res.json(data.map(a => ({ ...a, admin_name: a.admin?.first_name || '', target_name: a.target_type === 'user' ? names[a.target_id] || '' : '' })))
+  } catch (e) {
+    fail(res, 500, 'Could not load the activity log', e)
+  }
+})
+
+// GET /api/admin/attention — the same list the daily email sends.
+router.get('/attention', async (req, res) => {
+  try {
+    res.json(await loadDigest())
+  } catch (e) {
+    fail(res, 500, 'Could not load what needs attention', e)
+  }
+})
 
 // GET /api/admin/growth — the Growth tab: how far members get, per week of
 // sign-up, and classes vs learners per language (utils/growth.js).
@@ -87,6 +124,7 @@ router.get('/classes', async (req, res) => {
 router.post('/users/:id/approve', async (req, res) => {
   try {
     await approveMember(req.params.id)
+    await logAdminAction(req.userId, 'approve_member', { targetType: 'user', targetId: Number(req.params.id) })
     res.json({ success: true })
   } catch (e) {
     console.error('[APPROVE]', e.message)
@@ -104,6 +142,7 @@ router.get('/users/:id/certificate', async (req, res) => {
     const { data, error: signError } = await supabase.storage
       .from(CERTIFICATE_BUCKET).createSignedUrl(user.certificate_path, 10 * 60)
     if (signError) return fail(res, 400, 'Could not open the certificate', signError)
+    await logAdminAction(req.userId, 'open_certificate', { targetType: 'user', targetId: Number(req.params.id) })
     res.json({ url: data.signedUrl })
   } catch (e) {
     res.status(500).json({ error: 'Could not open the certificate' })
@@ -120,6 +159,7 @@ router.delete('/users/:id/certificate', async (req, res) => {
       .update({ certificate_path: null, certificate_name: null, certificate_uploaded_at: null })
       .eq('id', req.params.id)
     if (error) return fail(res, 400, 'Could not remove the certificate', error)
+    await logAdminAction(req.userId, 'remove_certificate', { targetType: 'user', targetId: Number(req.params.id) })
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not remove the certificate' })
@@ -134,6 +174,7 @@ router.post('/users/:id/lift-no-show', async (req, res) => {
     const { error } = await supabase.from('users').update({ teaching_paused_until: null, booking_limited_until: null }).eq('id', req.params.id)
     if (error) return fail(res, 400, 'Could not lift the limits', error)
     await supabase.from('no_show_events').update({ undone_at: new Date().toISOString() }).eq('user_id', req.params.id).is('undone_at', null)
+    await logAdminAction(req.userId, 'lift_no_show', { targetType: 'user', targetId: Number(req.params.id) })
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not lift the limits' })
@@ -147,6 +188,7 @@ router.post('/users/:id/reject', async (req, res) => {
       .update({ is_approved: false, approval_reason: 'Rejected by admin' })
       .eq('id', req.params.id)
     if (error) return fail(res, 400, 'Could not reject user', error)
+    await logAdminAction(req.userId, 'reject_member', { targetType: 'user', targetId: Number(req.params.id) })
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not reject user' })
@@ -193,6 +235,7 @@ router.post('/users/:id/credit', async (req, res) => {
     await supabase.from('notifications').insert(rows)
     pushNotifications(rows)
 
+    await logAdminAction(req.userId, 'give_bananas', { targetType: 'user', targetId: Number(req.params.id), detail: { amount } })
     res.json({ success: true, balance: newBalance })
   } catch (e) {
     console.error(e)
@@ -271,6 +314,7 @@ router.post('/users/:id/suspend', async (req, res) => {
       }),
     }).catch(e => console.error('[SUSPEND] Notification email failed', e.message))
 
+    await logAdminAction(req.userId, 'suspend', { targetType: 'user', targetId: Number(req.params.id), detail: { until: data?.suspended_until, reason: String(reason).trim() } })
     res.json({ ...data, classes_cancelled: classes.cancelled, students_refunded: classes.refunded })
   } catch (e) {
     console.error(e)
@@ -295,6 +339,7 @@ router.post('/users/:id/unsuspend', async (req, res) => {
 
     if (error) return fail(res, 400, 'Could not lift the suspension', error)
     if (!data) return res.status(404).json({ error: 'User not found' })
+    await logAdminAction(req.userId, 'unsuspend', { targetType: 'user', targetId: Number(req.params.id) })
     res.json(data)
   } catch (e) {
     console.error(e)
@@ -328,6 +373,7 @@ router.post('/users/:id/delete', async (req, res) => {
 
     const result = await deleteAccount(supabase, user)
     if (!result.ok) return fail(res, 500, 'Could not delete this account', result.error)
+    await logAdminAction(req.userId, 'delete_member', { targetType: 'user', targetId: Number(userId) })
 
     res.json({ deleted: userId })
   } catch (e) {
