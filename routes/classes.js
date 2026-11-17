@@ -63,7 +63,19 @@ router.get('/', publicGetLimiter, async (req, res) => {
     // Browsing drops classes nobody can join any more; a teacher-scoped query
     // keeps them, because the dashboard, teacher profiles, the history page
     // and StreakCalendar all rely on finished classes coming back.
-    res.json(req.query.teacher_id ? sorted : sorted.filter(cls => hasUpcomingSession(cls)))
+    const list = req.query.teacher_id ? sorted : sorted.filter(cls => hasUpcomingSession(cls))
+
+    // How many places each session has taken, for the Explore cards' spots
+    // bar. A count only: no names leave this public route.
+    const sessionIds = list.flatMap(cls => (cls.class_sessions || []).map(s => s.id))
+    if (sessionIds.length) {
+      const { data: booked } = await supabase.from('class_enrollments')
+        .select('class_session_id').in('class_session_id', sessionIds).neq('status', 'cancelled')
+      const taken = {}
+      for (const b of booked || []) taken[b.class_session_id] = (taken[b.class_session_id] || 0) + 1
+      for (const cls of list) for (const s of cls.class_sessions || []) s.taken = taken[s.id] || 0
+    }
+    res.json(list)
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch classes' })
   }
