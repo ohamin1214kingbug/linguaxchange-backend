@@ -165,6 +165,7 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
     if (status !== undefined) updates.status = status
     if (notes !== undefined) updates.notes = notes
 
+    const { data: before } = await supabase.from('reports').select('status').eq('id', req.params.id).maybeSingle()
     const { data, error } = await supabase
       .from('reports')
       .update(updates)
@@ -174,10 +175,45 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
 
     if (error) return fail(res, 400, 'Could not update report', error)
     if (!data) return res.status(404).json({ error: 'Report not found' })
+    // The member who sent it sees the new status on My reports; tell them.
+    // Notes are internal and never part of this.
+    if (status !== undefined && before?.status !== status && data.reporter_id) {
+      const { error: notifyError } = await supabase.from('notifications')
+        .insert([{ user_id: data.reporter_id, type: 'report_update', message: 'Your report was updated' }])
+      if (notifyError) console.error('[REPORT_UPDATE] Could not notify the reporter', notifyError.message)
+    }
     await logAdminAction(req.userId, 'update_report', { targetType: 'report', targetId: Number(req.params.id), detail: { status: status ?? null } })
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not update report' })
+  }
+})
+
+// GET /api/reports/mine — the reports this member sent, for My reports.
+// Who or what they reported, their own words, how many files, the status.
+// Never the admin's notes. Declared before the /:id routes.
+router.get('/mine', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('reports')
+      .select('id, report_type, reported_id, category, reason, status, evidence_paths, created_at')
+      .eq('reporter_id', req.userId).order('created_at', { ascending: false })
+    if (error) return fail(res, 400, 'Could not load your reports', error)
+    const userIds = [...new Set(data.filter(r => r.report_type === 'user').map(r => r.reported_id))]
+    const classIds = [...new Set(data.filter(r => r.report_type === 'class').map(r => r.reported_id))]
+    const [{ data: people }, { data: classes }] = await Promise.all([
+      userIds.length ? supabase.from('users').select('id, first_name, photo_url').in('id', userIds) : { data: [] },
+      classIds.length ? supabase.from('classes').select('id, title').in('id', classIds) : { data: [] },
+    ])
+    const person = Object.fromEntries((people || []).map(p => [p.id, p]))
+    const cls = Object.fromEntries((classes || []).map(c => [c.id, c]))
+    res.json(data.map(({ evidence_paths, ...r }) => ({
+      ...r,
+      files: (evidence_paths || []).length,
+      reported_name: r.report_type === 'user' ? person[r.reported_id]?.first_name || '' : cls[r.reported_id]?.title || '',
+      reported_photo: r.report_type === 'user' ? person[r.reported_id]?.photo_url || null : null,
+    })))
+  } catch (e) {
+    fail(res, 500, 'Could not load your reports', e)
   }
 })
 
