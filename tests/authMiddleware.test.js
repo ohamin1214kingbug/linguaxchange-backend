@@ -145,7 +145,7 @@ describe('requireAuth', () => {
 
 describe('requireAdmin', () => {
   test('allows a user whose email is in ADMIN_EMAILS', async () => {
-    mockUserRow = { data: { email: 'admin@example.com' }, error: null }
+    mockUserRow = { data: { email: 'admin@example.com', email_verified_at: '2026-11-17T00:00:00Z' }, error: null }
     const req = { userId: 1 }
     const res = mockRes()
     const next = jest.fn()
@@ -157,7 +157,7 @@ describe('requireAdmin', () => {
   })
 
   test('is case-insensitive when matching admin emails', async () => {
-    mockUserRow = { data: { email: 'Admin@Example.com' }, error: null }
+    mockUserRow = { data: { email: 'Admin@Example.com', email_verified_at: '2026-11-17T00:00:00Z' }, error: null }
     const req = { userId: 1 }
     const res = mockRes()
     const next = jest.fn()
@@ -170,6 +170,18 @@ describe('requireAdmin', () => {
   test('rejects a user whose email is not in ADMIN_EMAILS', async () => {
     mockUserRow = { data: { email: 'nobody@example.com' }, error: null }
     const req = { userId: 2 }
+    const res = mockRes()
+    const next = jest.fn()
+
+    await requireAdmin(req, res, next)
+
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(next).not.toHaveBeenCalled()
+  })
+
+  test('rejects an admin email that was never confirmed', async () => {
+    mockUserRow = { data: { email: 'admin@example.com', email_verified_at: null }, error: null }
+    const req = { userId: 3 }
     const res = mockRes()
     const next = jest.fn()
 
