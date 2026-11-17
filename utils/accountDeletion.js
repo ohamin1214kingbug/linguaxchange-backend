@@ -74,7 +74,13 @@ const OWN_DATA_DELETIONS = [
   { table: 'class_requests', column: 'student_id' },
   { table: 'user_native_languages', column: 'user_id' },
   { table: 'user_learning_languages', column: 'user_id' },
-  { table: 'language_credentials', column: 'user_id' }
+  { table: 'language_credentials', column: 'user_id' },
+  // Added 2026-11-17: these were left behind when an account was deleted.
+  { table: 'chat_messages', column: 'user_id' },
+  { table: 'push_subscriptions', column: 'user_id' },
+  { table: 'room_joins', column: 'user_id' },
+  { table: 'no_show_events', column: 'user_id' },
+  { table: 'request_offers', column: 'teacher_id' }
 ]
 
 module.exports = { anonymizedFields, OWN_DATA_DELETIONS }

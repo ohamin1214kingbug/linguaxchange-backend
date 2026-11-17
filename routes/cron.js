@@ -7,6 +7,7 @@ const { releaseDueFeedback, refundExpiredAssignments } = require('../utils/assig
 const { releaseDueAttendancePayouts } = require('../utils/attendancePayout')
 const { completeFinishedClasses } = require('../utils/classCompletion')
 const { runNoShowChecks } = require('../utils/noShow')
+const { purgeChats } = require('../utils/chatRetention')
 const { runHealthChecks } = require('../utils/healthChecks')
 const { recordRun, REMINDER_JOB } = require('../utils/cronHeartbeat')
 
@@ -48,6 +49,13 @@ async function handleSendReminders(req, res) {
   // and weekly streak count. Nobody has to press "Mark complete" any more.
   const { completed: classesCompleted } = await completeFinishedClasses()
 
+  // Old chat messages go (utils/chatRetention.js). A failure here must not
+  // cost the reminders above, so it is caught and logged.
+  const { removed: chatMessagesRemoved } = await purgeChats().catch(e => {
+    console.error('[CHAT_RETENTION]', e.message)
+    return { removed: 0 }
+  })
+
   // Recorded even when this tick sent nothing — that is what makes a silent
   // scheduler distinguishable from a quiet one. Never throws, so a failed
   // heartbeat cannot cost a reminder that already went out.
@@ -55,7 +63,7 @@ async function handleSendReminders(req, res) {
 
   res.json({
     ...summary, startingSoonNotified, liveNotified, endedNotified, noShows, requestsRefunded,
-    feedbackReleased, assignmentsRefunded, attendancePaid, classesCompleted,
+    feedbackReleased, assignmentsRefunded, attendancePaid, classesCompleted, chatMessagesRemoved,
   })
 }
 
