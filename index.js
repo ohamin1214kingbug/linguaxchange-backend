@@ -110,6 +110,9 @@ app.use((req, res, next) => {
   })
 })
 
+// Which build is live, so a deploy can be confirmed from outside. Railway
+// sets RAILWAY_GIT_COMMIT_SHA; it is the public repo-internal commit id only.
+app.get('/api/version', (req, res) => res.json({ commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || null }))
 app.use('/api/auth', authRoutes)
 app.use('/api/classes', classRoutes)
 app.use('/api/credits', creditRoutes)

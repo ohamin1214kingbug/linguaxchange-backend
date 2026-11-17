@@ -60,15 +60,22 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
   .map(e => e.trim().toLowerCase())
   .filter(Boolean)
 
+// Admin rights come from ADMIN_EMAILS, so they also need the address to be
+// proven (email code or Google). Otherwise registering an admin's address
+// before they do would hand over the admin page.
+function isAdminUser(user) {
+  return Boolean(user?.email_verified_at) && ADMIN_EMAILS.includes(String(user.email).toLowerCase())
+}
+
 async function requireAdmin(req, res, next) {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('email')
+      .select('email, email_verified_at')
       .eq('id', req.userId)
       .single()
 
-    if (error || !user || !ADMIN_EMAILS.includes(user.email.toLowerCase())) {
+    if (error || !isAdminUser(user)) {
       return res.status(403).json({ error: 'Admin access required' })
     }
     next()
@@ -83,13 +90,13 @@ async function isAdmin(userId) {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('email')
+      .select('email, email_verified_at')
       .eq('id', userId)
       .single()
-    return !error && !!user && ADMIN_EMAILS.includes(user.email.toLowerCase())
+    return !error && isAdminUser(user)
   } catch (e) {
     return false
   }
 }
 
-module.exports = { requireAuth, requireAdmin, isAdmin }
+module.exports = { requireAuth, requireAdmin, isAdmin, isAdminUser }

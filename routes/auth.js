@@ -7,7 +7,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 const { renderEmail } = require('../utils/emailTemplate')
 const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
-const { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter } = require('../middleware/rateLimit')
+const { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, emailCodeSendLimiter, emailCodeCheckLimiter } = require('../middleware/rateLimit')
 const { sendOtp, checkOtp, isValidPhoneNumber, otpErrorKey } = require('../utils/phoneVerify')
 const { phoneAccountLimitReached } = require('../utils/phoneAccountLimit')
 const { requireAuth } = require('../middleware/auth')
@@ -22,6 +22,7 @@ const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { fail } = require('../utils/failure')
 const { resolveReferrer } = require('../utils/referrals')
 const { isSuspended } = require('../utils/suspension')
+const { newCode, issueCodeToken, checkCode, issueVerifiedToken, isVerifiedFor, codeEmail, normalize } = require('../utils/emailCode')
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 // Long enough to finish the rest of the registration form after verifying,
 // short enough that a leaked token can't be replayed much later.
@@ -51,6 +52,28 @@ function sendWelcomeEmail({ email, first_name }) {
   })
 }
 
+// POST /api/auth/send-email-code {email} — emails a 6-digit code and returns
+// { code_token } to send back with it (utils/emailCode.js). Sent whether or
+// not the address has an account, so this can't be used to look them up.
+router.post('/send-email-code', emailCodeSendLimiter, async (req, res) => {
+  const email = normalize(req.body?.email)
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email' })
+  try {
+    const code = newCode()
+    await sendEmail({ to: email, ...codeEmail(code) })
+    res.json({ code_token: issueCodeToken(email, code) })
+  } catch (e) {
+    fail(res, 500, 'Could not send the code', e)
+  }
+})
+
+// POST /api/auth/verify-email-code {email, code_token, code} → { email_verified_token }
+router.post('/verify-email-code', emailCodeCheckLimiter, (req, res) => {
+  const result = checkCode(req.body?.code_token, req.body?.email, req.body?.code)
+  if (!result.ok) return res.status(400).json({ error: result.error })
+  res.json({ email_verified_token: issueVerifiedToken(req.body.email) })
+})
+
 router.post('/register', registerLimiter, async (req, res) => {
   const {
     email, password, first_name, last_name, nationality, phone_number, verified_token, invite_code,
@@ -58,6 +81,12 @@ router.post('/register', registerLimiter, async (req, res) => {
   } = req.body
 
   if (!email || !EMAIL_RE.test(email)) return res.status(400).json({ error: 'Please enter a valid email' })
+  // Prove the address first (POST /send-email-code, /verify-email-code).
+  // Without it anyone could open an account in someone else's name, and
+  // that person's later Google sign-in would land in it.
+  if (!isVerifiedFor(req.body.email_verified_token, email)) {
+    return res.status(400).json({ error: 'Confirm your email with the code we send you first' })
+  }
   if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' })
   if (!first_name || !last_name) return res.status(400).json({ error: 'First and last name are required' })
 
@@ -104,7 +133,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       .from('users')
       .insert([{
         email, password_hash, first_name, last_name, nationality,
-        phone_number, phone_verified: true,
+        phone_number, phone_verified: true, email_verified_at: new Date().toISOString(),
         // Everything the form already asked for, finally kept.
         bio: bio || null,
         teach_language: String(teach_language).toUpperCase(),
@@ -380,7 +409,7 @@ router.post('/google-login', async (req, res) => {
     // Check if user already exists
     const { data: existing } = await supabase
       .from('users')
-      .select('id, email, first_name, is_approved, phone_verified, suspended_until, suspension_reason')
+      .select('id, email, first_name, is_approved, phone_verified, suspended_until, suspension_reason, email_verified_at, password_hash')
       .eq('email', email)
       .maybeSingle()
 
@@ -396,6 +425,23 @@ router.post('/google-login', async (req, res) => {
           reason: existing.suspension_reason || null
         })
       }
+    }
+
+    // Google has just proved this person owns the email. A password account
+    // under it that never confirmed the address may have been opened by
+    // someone else: turn its password off and sign out every other session.
+    // The owner can set a new password via "Forgot password" (their inbox).
+    if (existing && !existing.email_verified_at) {
+      const cutoff = new Date()
+      cutoff.setMilliseconds(0) // jwt iat is whole seconds; see change-password
+      await supabase.from('users')
+        .update({ email_verified_at: new Date().toISOString(), password_hash: null, token_valid_after: cutoff.toISOString() })
+        .eq('id', existing.id)
+      if (existing.password_hash) console.log('[GOOGLE_LOGIN] Turned off the unconfirmed password on account', existing.id)
+    }
+    if (existing) {
+      delete existing.password_hash
+      delete existing.email_verified_at
     }
 
     let user = existing
@@ -414,7 +460,7 @@ router.post('/google-login', async (req, res) => {
       const referred_by = await resolveReferrer(invite_code)
       const { data: newUser, error } = await supabase
         .from('users')
-        .insert([{ email, first_name, last_name, google_id, is_approved: false, phone_verified: false, ...(referred_by ? { referred_by } : {}) }])
+        .insert([{ email, first_name, last_name, google_id, is_approved: false, phone_verified: false, email_verified_at: new Date().toISOString(), ...(referred_by ? { referred_by } : {}) }])
         .select('id, email, first_name, is_approved, phone_verified')
         .single()
 

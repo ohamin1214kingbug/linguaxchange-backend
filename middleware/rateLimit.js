@@ -50,6 +50,8 @@ const phoneKey = req => {
 }
 
 const ipPhoneKey = req => `${keyGenerator(req)}|${phoneKey(req)}`
+const emailKey = req => `email|${typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''}`
+const ipEmailKey = req => `${keyGenerator(req)}|${emailKey(req)}`
 
 function limiter(windowMs, limit, error, options = {}) {
   return rateLimit({
@@ -93,6 +95,17 @@ const otpCheckLimiter = [
   limiter(HOUR, 10, 'Too many attempts. Please request a new code and try again.', { keyGenerator: ipPhoneKey }),
 ]
 
+// Sign-up email codes: a few sends per address, and few guesses per
+// machine and address. The code itself is 6 digits and lives 15 minutes.
+const emailCodeSendLimiter = [
+  limiter(HOUR, 20, 'Too many codes requested. Please try again later.'),
+  limiter(HOUR, 5, 'Too many codes requested for this email. Please try again later.', { keyGenerator: emailKey }),
+]
+const emailCodeCheckLimiter = [
+  limiter(HOUR, 50, 'Too many attempts. Please request a new code and try again.'),
+  limiter(HOUR, 10, 'Too many attempts. Please request a new code and try again.', { keyGenerator: ipEmailKey }),
+]
+
 // Public, unauthenticated browse/lookup routes have no other throttle —
 // without this, bulk-scraping (e.g. iterating user IDs) is unthrottled.
 const publicGetLimiter = limiter(60 * 1000, 100, 'Too many requests. Please slow down.')
@@ -110,4 +123,4 @@ const verifyEmailLimiter = [
 // account, so a whole campus behind one address is not one bucket.
 const chatPostLimiter = limiter(60 * 1000, 20, 'You are sending messages too fast. Wait a moment.', { keyGenerator: req => `user|${req.userId}` })
 
-module.exports = { chatPostLimiter, keyGenerator, accountKey, phoneKey, loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, publicGetLimiter, verifyEmailLimiter }
+module.exports = { emailCodeSendLimiter, emailCodeCheckLimiter, chatPostLimiter, keyGenerator, accountKey, phoneKey, loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, publicGetLimiter, verifyEmailLimiter }
