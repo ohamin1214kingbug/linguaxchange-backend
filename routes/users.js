@@ -9,6 +9,7 @@ const { checkAndNotifyIfAlreadyLow } = require('../utils/lowCreditNudge')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { fail } = require('../utils/failure')
 const { decodeImage } = require('../utils/imageUpload')
+const { cleanImage } = require('../utils/imageClean')
 const { parseUserQuery, MAX_RESULTS, FUZZY_THRESHOLD } = require('../utils/userSearch')
 const { LANGUAGES, TEACH_LEVELS, PROFILE_COLORS, cleanLearnDetails } = require('../utils/profileFields')
 const { decodeCertificate, cleanFileName, certificatePaths, CERTIFICATE_BUCKET } = require('../utils/certificateUpload')
@@ -181,12 +182,18 @@ const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 // Supabase Storage directly, so the storage.objects policies don't need to
 // stay open to the public anon key just for logged-in users to upload.
 // Saves a decoded image as the member's photo and returns their profile.
+// Re-saved without hidden data first (utils/imageClean.js): photos are
+// public and phone photos can carry the GPS position they were taken at.
 async function storeAvatar(userId, decoded) {
-  const path = `avatars/${userId}.${decoded.ext}`
+  const clean = await cleanImage(decoded.buffer)
+  const path = `avatars/${userId}.${clean.ext}`
   const { error: uploadError } = await supabase.storage
     .from('avatars')
-    .upload(path, decoded.buffer, { contentType: decoded.mime, upsert: true })
+    .upload(path, clean.buffer, { contentType: clean.mime, upsert: true })
   if (uploadError) return { error: uploadError }
+  // An older photo saved under another extension would stay public.
+  await supabase.storage.from('avatars')
+    .remove(['jpg', 'png', 'webp'].filter(e => e !== clean.ext).map(e => `avatars/${userId}.${e}`))
   const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
   // Versioned: the path stays the same when the photo changes, so caches
   // would otherwise keep the old one.
