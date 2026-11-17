@@ -2,7 +2,7 @@ const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
 const { recordCreditTransaction } = require('../utils/creditLedger')
-const { requireAuth, requireAdmin } = require('../middleware/auth')
+const { requireAuth, requireAdmin, isAdmin } = require('../middleware/auth')
 const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 const { fail } = require('../utils/failure')
 const { sendEmail } = require('../utils/mailer')
@@ -246,10 +246,21 @@ router.post('/users/:id/credit', async (req, res) => {
 // POST /api/admin/users/:id/suspend
 // A permanent ban is a far-future `until`, not a separate flag — two columns
 // can disagree about whether someone is banned, one cannot.
+// An admin can't suspend or delete themselves or another admin: one test
+// report against the owner's own account suspended it for 30 days
+// (2026-11-17). Change ADMIN_EMAILS first if that is ever really meant.
+async function protectedAccount(req, userId) {
+  if (userId === req.userId) return 'You cannot do this to your own account'
+  if (await isAdmin(userId)) return 'This is an admin account; remove it from ADMIN_EMAILS first'
+  return null
+}
+
 router.post('/users/:id/suspend', async (req, res) => {
   const { until, reason } = req.body
   const userId = parseInt(req.params.id)
   if (!userId) return res.status(400).json({ error: 'Invalid user id' })
+  const blocked = await protectedAccount(req, userId)
+  if (blocked) return res.status(400).json({ error: blocked })
 
   const endsAt = new Date(until)
   if (!until || Number.isNaN(endsAt.getTime())) {
@@ -355,6 +366,8 @@ router.post('/users/:id/unsuspend', async (req, res) => {
 router.post('/users/:id/delete', async (req, res) => {
   const userId = parseInt(req.params.id)
   if (!userId) return res.status(400).json({ error: 'Invalid user id' })
+  const blocked = await protectedAccount(req, userId)
+  if (blocked) return res.status(400).json({ error: blocked })
 
   const expected = 'U' + String(userId).padStart(6, '0')
   if (req.body.confirm !== expected) {
