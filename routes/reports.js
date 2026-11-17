@@ -4,6 +4,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requireAuth, requireAdmin } = require('../middleware/auth')
 const { STATUSES, validateReport } = require('../utils/reports')
 const { fail } = require('../utils/failure')
+const { logAdminAction } = require('../utils/adminLog')
 const { decodeImage, MAX_EVIDENCE } = require('../utils/imageUpload')
 const { decodePdf } = require('../utils/pdfUpload')
 
@@ -173,6 +174,7 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
 
     if (error) return fail(res, 400, 'Could not update report', error)
     if (!data) return res.status(404).json({ error: 'Report not found' })
+    await logAdminAction(req.userId, 'update_report', { targetType: 'report', targetId: Number(req.params.id), detail: { status: status ?? null } })
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not update report' })
@@ -252,6 +254,7 @@ router.get('/:id/evidence/:index', requireAuth, requireAdmin, async (req, res) =
       .createSignedUrl(path, 60 * 60)
 
     if (signError) return fail(res, 400, 'Could not open the evidence', signError)
+    await logAdminAction(req.userId, 'open_evidence', { targetType: 'report', targetId: Number(req.params.id), detail: { file: Number(req.params.index) } })
     res.json({ url: signed.signedUrl })
   } catch (e) {
     console.error(e)

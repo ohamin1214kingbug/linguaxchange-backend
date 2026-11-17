@@ -38,6 +38,7 @@ const studentFeedbackRoutes = require('./routes/studentFeedback')
 const classRequestRoutes = require('./routes/classRequests')
 const reportRoutes = require('./routes/reports')
 const savedTeacherRoutes = require('./routes/savedTeachers')
+const { publicGetLimiter } = require('./middleware/rateLimit')
 const accountRoutes = require('./routes/account')
 const resourceRoutes = require('./routes/resources')
 const universityRoutes = require('./routes/university')
@@ -109,6 +110,22 @@ app.use((req, res, next) => {
     next(err)
   })
 })
+
+// Browsers report what the Content-Security-Policy blocked (or would block,
+// while it is report-only; see next.config.mjs). Logged as [CSP] for review.
+// Only the blocked address and the rule are kept: no cookies, no page text.
+app.post('/api/csp-report', publicGetLimiter,
+  express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '16kb' }),
+  (req, res) => {
+    const list = Array.isArray(req.body) ? req.body.map(r => r.body || {}) : [req.body?.['csp-report'] || {}]
+    for (const r of list.slice(0, 10)) {
+      const blocked = r.blockedURL || r['blocked-uri'] || ''
+      const rule = r.effectiveDirective || r['effective-directive'] || r['violated-directive'] || ''
+      const page = (r.documentURL || r['document-uri'] || '').split('?')[0]
+      console.log('[CSP]', rule, String(blocked).slice(0, 200), 'on', String(page).slice(0, 200))
+    }
+    res.status(204).end()
+  })
 
 // Which build is live, so a deploy can be confirmed from outside. Railway
 // sets RAILWAY_GIT_COMMIT_SHA; it is the public repo-internal commit id only.
