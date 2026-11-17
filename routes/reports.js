@@ -160,10 +160,22 @@ router.patch('/:id', requireAuth, requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Invalid status' })
   }
 
+  // Closing a report needs a written reason (admin-only, saved in notes and
+  // signed with the admin's name and the date).
+  const closing = status === 'resolved' || status === 'rejected'
+  if (closing && !String(notes || '').trim()) {
+    return res.status(400).json({ error: 'Write down why before closing the report' })
+  }
+
   try {
     const updates = { updated_at: new Date().toISOString() }
     if (status !== undefined) updates.status = status
     if (notes !== undefined) updates.notes = notes
+    if (closing) {
+      const { data: admin } = await supabase.from('users').select('first_name').eq('id', req.userId).maybeSingle()
+      const day = new Date().toISOString().slice(0, 10)
+      updates.notes = `${admin?.first_name || 'Admin'}, ${day}: ${String(notes).trim().slice(0, 1000)}`
+    }
 
     const { data: before } = await supabase.from('reports').select('status').eq('id', req.params.id).maybeSingle()
     const { data, error } = await supabase
