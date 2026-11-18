@@ -11,3 +11,4 @@ scripts/.announce-rename-sent.json
 scripts/.announce-approved-sent.json
 # Local send log for scripts/announceTeach.js.
 scripts/.announce-teach-sent.json
+.come-back-sent.json
