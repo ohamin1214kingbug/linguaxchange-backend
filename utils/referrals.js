@@ -100,4 +100,4 @@ async function referralStats(userId) {
   }
 }
 
-module.exports = { MAX_REWARDED_INVITES, parseInviteCode, resolveReferrer, rewardReferral, referralStats }
+module.exports = { MAX_REWARDED_INVITES, parseInviteCode, resolveReferrer, rewardReferral, referralStats, grantBonus }

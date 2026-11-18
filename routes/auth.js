@@ -22,6 +22,7 @@ const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { fail } = require('../utils/failure')
 const { resolveReferrer } = require('../utils/referrals')
 const { isSuspended } = require('../utils/suspension')
+const { grantSurveyBanana } = require('../utils/surveyBanana')
 const { newCode, issueCodeToken, checkCode, issueVerifiedToken, isVerifiedFor, codeEmail, normalize } = require('../utils/emailCode')
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000
 // Long enough to finish the rest of the registration form after verifying,
@@ -311,8 +312,10 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
         .insert([{ user_id: req.userId, balance: SIGNUP_CREDIT_GRANT }])
     }
 
+    // A survey finished before the phone was verified pays its banana now.
+    const survey = existingCredit ? 'none' : await grantSurveyBanana(req.userId).catch(() => 'none')
     // `granted` lets the page say "3 bananas added" only when they were.
-    res.json({ user: updated, granted: existingCredit ? 0 : SIGNUP_CREDIT_GRANT })
+    res.json({ user: updated, granted: existingCredit ? 0 : SIGNUP_CREDIT_GRANT + (survey === 'granted' ? 1 : 0) })
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not verify phone number' })

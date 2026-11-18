@@ -12,6 +12,7 @@ const { deleteAccount } = require('../utils/deleteAccount')
 const { buildGrowth } = require('../utils/growth')
 const { logAdminAction } = require('../utils/adminLog')
 const { loadDigest } = require('../utils/adminDigest')
+const { summarize } = require('../utils/survey')
 const { cancelTeacherClasses } = require('../utils/classCancellation')
 const { pushNotifications } = require('../utils/push')
 const { certificatePaths, CERTIFICATE_BUCKET } = require('../utils/certificateUpload')
@@ -59,6 +60,19 @@ router.get('/attention', async (req, res) => {
     res.json(await loadDigest())
   } catch (e) {
     fail(res, 500, 'Could not load what needs attention', e)
+  }
+})
+
+// GET /api/admin/survey — survey results for the Growth tab (counts, plus
+// the latest free-text answers).
+router.get('/survey', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('survey_responses')
+      .select('heard_from, heard_detail, who, who_detail, goals, times, ideas, completed_at')
+    if (error) return fail(res, 400, 'Could not load survey results', error)
+    res.json(summarize(data))
+  } catch (e) {
+    fail(res, 500, 'Could not load survey results', e)
   }
 })
 
