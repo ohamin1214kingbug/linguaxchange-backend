@@ -14,6 +14,7 @@ const supabase = createClient(
 
 // POST /api/video/room - get the Jitsi room for a class session
 router.post('/room', requireAuth, async (req, res) => {
+  if (req.body?.tandem_id) return tandemRoom(req, res)
   const { class_session_id } = req.body
   if (!class_session_id) return res.status(400).json({ error: 'class_session_id is required' })
 
@@ -121,6 +122,41 @@ router.post('/room', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Could not get video room' })
   }
 })
+
+// A tandem's room: both members, any time while the tandem is accepted.
+// Both are moderators (equal partners, and no "waiting for the host"); the room name is the same HMAC scheme as classes
+// with a 'tandem-' prefix, so it can't collide with a session id.
+async function tandemRoom(req, res) {
+  try {
+    const { loadTandem } = require('./tandems')
+    const t = await loadTandem(req.body.tandem_id, req.userId)
+    if (!t) return res.status(403).json({ error: 'Not your tandem' })
+    if (t.tandem.status !== 'accepted') return res.status(403).json({ error: 'This tandem has ended' })
+    const appId = process.env.JAAS_APP_ID
+    if (!appId || !process.env.JAAS_KID || !process.env.JAAS_PRIVATE_KEY) {
+      console.error('[VIDEO] JaaS env vars missing - cannot issue a room token')
+      return res.status(500).json({ error: 'Video is not configured' })
+    }
+    const { data: people } = await supabase.from('users').select('id, first_name, last_name').in('id', [req.userId, t.otherId])
+    const me = (people || []).find(p => p.id === req.userId)
+    const other = (people || []).find(p => p.id === t.otherId)
+    const room = buildRoomName(`tandem-${t.tandem.id}`, process.env.JWT_SECRET)
+    const displayName = `${me?.first_name || 'User'} ${me?.last_name || ''}`.trim()
+    res.json({
+      domain: '8x8.vc',
+      roomName: `${appId}/${room}`,
+      jwt: buildJaasToken({ appId, kid: process.env.JAAS_KID, privateKey: process.env.JAAS_PRIVATE_KEY, room, userId: req.userId, displayName, isModerator: true }),
+      displayName,
+      topic: `Tandem with ${other?.first_name || 'your partner'}`,
+      isTeacher: false,
+      participants: other ? [{ id: other.id, first_name: other.first_name, last_name: other.last_name, role: 'partner' }] : [],
+      classInfo: null,
+    })
+  } catch (e) {
+    console.error('[VIDEO_TANDEM]', e.message)
+    res.status(500).json({ error: 'Could not get video room' })
+  }
+}
 
 // Pure: who else is in the room. Cancelled places are left out. A
 // student's level and note are for the teacher to pitch the class;
