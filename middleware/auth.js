@@ -22,7 +22,7 @@ async function requireAuth(req, res, next) {
     // even though it hasn't expired yet.
     const { data: user, error: userError } = await supabase
       .from('users')
-      .select('token_valid_after, suspended_until, suspension_reason')
+      .select('token_valid_after, suspended_until, suspension_reason, phone_verified')
       .eq('id', payload.userId)
       .single()
 
@@ -49,10 +49,23 @@ async function requireAuth(req, res, next) {
     }
 
     req.userId = payload.userId
+    req.phoneVerified = user.phone_verified === true
     next()
   } catch (e) {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
+}
+
+// After requireAuth, on actions that reach other members for free (tandems,
+// tandem groups, creating or offering to teach a class). Joining a class
+// already needs bananas, which only a verified phone unlocks; without this,
+// a Google account that skipped the phone step could still message and
+// notify real members (owner report, 2026-11-19). The error is a
+// translation key: the pages show it with t(), and code lets them link to
+// the phone page. Reports stay open to everyone.
+function requireVerifiedPhone(req, res, next) {
+  if (req.phoneVerified) return next()
+  res.status(403).json({ error: 'common.phoneRequired', code: 'PHONE_REQUIRED' })
 }
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
@@ -99,4 +112,4 @@ async function isAdmin(userId) {
   }
 }
 
-module.exports = { requireAuth, requireAdmin, isAdmin, isAdminUser }
+module.exports = { requireAuth, requireAdmin, isAdmin, isAdminUser, requireVerifiedPhone }

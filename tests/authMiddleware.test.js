@@ -203,3 +203,32 @@ describe('requireAdmin', () => {
     expect(next).not.toHaveBeenCalled()
   })
 })
+
+describe('requireVerifiedPhone', () => {
+  const { requireVerifiedPhone } = require('../middleware/auth')
+  const token = () => jwt.sign({ userId: 7 }, 'test-secret')
+
+  test('requireAuth records whether the phone is verified', async () => {
+    for (const [phone_verified, expected] of [[true, true], [false, false], [null, false]]) {
+      mockUserRow = { data: { token_valid_after: null, suspended_until: null, phone_verified }, error: null }
+      const req = { headers: { authorization: `Bearer ${token()}` } }
+      const next = jest.fn()
+      await requireAuth(req, mockRes(), next)
+      expect(next).toHaveBeenCalled()
+      expect(req.phoneVerified).toBe(expected)
+    }
+  })
+
+  test('lets a verified member through and stops the rest with a translatable error', () => {
+    const next = jest.fn()
+    requireVerifiedPhone({ phoneVerified: true }, mockRes(), next)
+    expect(next).toHaveBeenCalled()
+
+    const res = mockRes()
+    const blocked = jest.fn()
+    requireVerifiedPhone({ phoneVerified: false }, res, blocked)
+    expect(blocked).not.toHaveBeenCalled()
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(res.json).toHaveBeenCalledWith({ error: 'common.phoneRequired', code: 'PHONE_REQUIRED' })
+  })
+})

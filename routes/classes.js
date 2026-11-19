@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { requireAuth, requireAdmin, isAdmin } = require('../middleware/auth')
+const { requireAuth, requireAdmin, isAdmin, requireVerifiedPhone } = require('../middleware/auth')
 const { sendEmail } = require('../utils/mailer')
 const { renderEmail } = require('../utils/emailTemplate')
 const { FRONTEND_URL } = require('../utils/frontendUrl')
@@ -190,7 +190,7 @@ async function copyLessonPdf(sourceId, cls, userId) {
   }
 }
 
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, requireVerifiedPhone, async (req, res) => {
   const {
     language_code, level, topic,
     title, description, max_students, duration_minutes,

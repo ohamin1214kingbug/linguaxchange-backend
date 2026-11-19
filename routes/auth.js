@@ -296,7 +296,7 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
       .from('users')
       .update({ phone_number, phone_verified: true })
       .eq('id', req.userId)
-      .select('id, email, first_name, is_approved, phone_verified')
+      .select('id, email, first_name, is_approved, phone_verified, referred_by')
       .single()
 
     if (error) return fail(res, 400, 'Could not verify phone number', error)
@@ -315,8 +315,16 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
 
     // A survey finished before the phone was verified pays its banana now.
     const survey = existingCredit ? 'none' : await grantSurveyBanana(req.userId).catch(() => 'none')
+    const { referred_by, ...user } = updated
     // `granted` lets the page say "3 bananas added" only when they were.
-    res.json({ user: updated, granted: existingCredit ? 0 : SIGNUP_CREDIT_GRANT + (survey === 'granted' ? 1 : 0) })
+    res.json({ user, granted: existingCredit ? 0 : SIGNUP_CREDIT_GRANT + (survey === 'granted' ? 1 : 0) })
+    // First verification = the signup is now real: the messages a Google
+    // signup used to send at once (see /google). Best effort, after the reply.
+    if (!existingCredit) {
+      sendWelcomeEmail(user).catch(e => console.error('[ADD_PHONE] welcome', e.message))
+      notifyAdminsOfPendingUser(user).catch(e => console.error('[ADD_PHONE] admin', e.message))
+      if (referred_by) notifyInviteJoined(referred_by, user.first_name)
+    }
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not verify phone number' })
@@ -469,11 +477,11 @@ router.post('/google-login', async (req, res) => {
         .single()
 
       if (error) return fail(res, 400, 'Google login failed', error)
-      if (referred_by) notifyInviteJoined(referred_by, newUser.first_name)
-
-      await sendWelcomeEmail({ email, first_name })
-
-      await notifyAdminsOfPendingUser(newUser)
+      // The welcome email, the admin's "waiting for approval" email and the
+      // inviter's bell wait for /add-phone (owner report, 2026-11-19): a
+      // Google account exists from this moment so it can be signed in, but
+      // until the phone is verified it is unfinished, and pressing Back on
+      // the phone page used to leave a real-looking signup behind.
 
       user = newUser
     }
