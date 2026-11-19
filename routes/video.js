@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/auth')
 const { buildRoomName } = require('../utils/roomName')
 const { buildJaasToken } = require('../utils/jaasToken')
 const { canJoinClassroom } = require('../utils/classroomAccess')
+const { TANDEM_CALL_MINUTES } = require('../utils/tandem')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -15,6 +16,7 @@ const supabase = createClient(
 // POST /api/video/room - get the Jitsi room for a class session
 router.post('/room', requireAuth, async (req, res) => {
   if (req.body?.tandem_id) return tandemRoom(req, res)
+  if (req.body?.tandem_group_id) return tandemGroupRoom(req, res)
   const { class_session_id } = req.body
   if (!class_session_id) return res.status(400).json({ error: 'class_session_id is required' })
 
@@ -123,7 +125,8 @@ router.post('/room', requireAuth, async (req, res) => {
   }
 })
 
-// A tandem's room: both members, any time while the tandem is accepted.
+// A tandem's room: both members, from 10 minutes before the agreed call
+// (same window as a class teacher) until 30 minutes after it ends.
 // Both are moderators (equal partners, and no "waiting for the host"); the room name is the same HMAC scheme as classes
 // with a 'tandem-' prefix, so it can't collide with a session id.
 async function tandemRoom(req, res) {
@@ -132,6 +135,9 @@ async function tandemRoom(req, res) {
     const t = await loadTandem(req.body.tandem_id, req.userId)
     if (!t) return res.status(403).json({ error: 'Not your tandem' })
     if (t.tandem.status !== 'accepted') return res.status(403).json({ error: 'This tandem has ended' })
+    if (!t.tandem.agreed_time) return res.status(403).json({ error: 'Agree a time in the chat first' })
+    const window = canJoinClassroom({ sessionDate: t.tandem.agreed_time, durationMinutes: TANDEM_CALL_MINUTES, isTeacher: true })
+    if (!window.ok) return res.status(403).json({ error: window.error.replace('classroom', 'video call').replace('class', 'call'), opens_at: window.opensAt || null })
     const appId = process.env.JAAS_APP_ID
     if (!appId || !process.env.JAAS_KID || !process.env.JAAS_PRIVATE_KEY) {
       console.error('[VIDEO] JaaS env vars missing - cannot issue a room token')
@@ -154,6 +160,42 @@ async function tandemRoom(req, res) {
     })
   } catch (e) {
     console.error('[VIDEO_TANDEM]', e.message)
+    res.status(500).json({ error: 'Could not get video room' })
+  }
+}
+
+// A tandem group's room: its members, from 10 minutes before the call. The
+// host is moderator. Room name: the HMAC scheme with a 'tgroup-' prefix.
+async function tandemGroupRoom(req, res) {
+  try {
+    const { data: group } = await supabase.from('tandem_groups').select('*').eq('id', req.body.tandem_group_id).maybeSingle()
+    if (!group || group.cancelled_at) return res.status(404).json({ error: 'This group was cancelled' })
+    const { data: members } = await supabase.from('tandem_group_members')
+      .select('user_id, side, users(id, first_name, last_name)').eq('group_id', group.id)
+    const me = (members || []).find(m => m.user_id === req.userId)
+    if (!me) return res.status(403).json({ error: 'Join the group first' })
+    const window = canJoinClassroom({ sessionDate: group.starts_at, durationMinutes: group.duration_minutes, isTeacher: true })
+    if (!window.ok) return res.status(403).json({ error: window.error.replace('classroom', 'video call').replace('class', 'call'), opens_at: window.opensAt || null })
+    const appId = process.env.JAAS_APP_ID
+    if (!appId || !process.env.JAAS_KID || !process.env.JAAS_PRIVATE_KEY) {
+      console.error('[VIDEO] JaaS env vars missing - cannot issue a room token')
+      return res.status(500).json({ error: 'Video is not configured' })
+    }
+    const room = buildRoomName(`tgroup-${group.id}`, process.env.JWT_SECRET)
+    const displayName = `${me.users?.first_name || 'User'} ${me.users?.last_name || ''}`.trim()
+    res.json({
+      domain: '8x8.vc',
+      roomName: `${appId}/${room}`,
+      jwt: buildJaasToken({ appId, kid: process.env.JAAS_KID, privateKey: process.env.JAAS_PRIVATE_KEY, room, userId: req.userId, displayName, isModerator: group.host_id === req.userId }),
+      displayName,
+      topic: group.topic || `Tandem group ${group.lang_a} ⇄ ${group.lang_b}`,
+      isTeacher: false,
+      participants: (members || []).filter(m => m.user_id !== req.userId && m.users)
+        .map(m => ({ id: m.users.id, first_name: m.users.first_name, last_name: m.users.last_name, role: m.user_id === group.host_id ? 'host' : 'member' })),
+      classInfo: null,
+    })
+  } catch (e) {
+    console.error('[VIDEO_TANDEM_GROUP]', e.message)
     res.status(500).json({ error: 'Could not get video room' })
   }
 }

@@ -21,7 +21,7 @@ router.get('/export', requireAuth, async (req, res) => {
   try {
     const id = req.userId
 
-    const [profile, credits, transactions, classesTaught, enrollments, reviewsWritten, feedbackReceived, savedTeachers, reportsFiled] =
+    const [profile, credits, transactions, classesTaught, enrollments, reviewsWritten, feedbackReceived, savedTeachers, reportsFiled, tandemHellos, tandemGroups] =
       await Promise.all([
         supabase.from('users')
           .select('id, email, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, learn_details, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, profile_color, created_at, timezone, timezone_source, time_format, current_streak, longest_streak, phone_number, phone_verified, is_approved')
@@ -35,7 +35,11 @@ router.get('/export', requireAuth, async (req, res) => {
         supabase.from('saved_teachers').select('teacher_id, created_at').eq('user_id', id),
         // Only the parts that are this user's own words/actions. reported_id
         // is another person and is deliberately not included.
-        supabase.from('reports').select('id, report_type, reason, status, created_at').eq('reporter_id', id)
+        supabase.from('reports').select('id, report_type, reason, status, created_at').eq('reporter_id', id),
+        // Hellos this member wrote (the partner is another person, left out)
+        // and the tandem groups they joined.
+        supabase.from('tandems').select('id, message, status, created_at, agreed_time').eq('requester_id', id),
+        supabase.from('tandem_group_members').select('group_id, side, joined_at').eq('user_id', id),
       ])
 
     const payload = {
@@ -49,7 +53,9 @@ router.get('/export', requireAuth, async (req, res) => {
       reviews_written: reviewsWritten.data || [],
       feedback_received: feedbackReceived.data || [],
       saved_teachers: savedTeachers.data || [],
-      reports_filed: reportsFiled.data || []
+      reports_filed: reportsFiled.data || [],
+      tandem_hellos_sent: tandemHellos.data || [],
+      tandem_groups_joined: tandemGroups.data || [],
     }
 
     res.setHeader('Content-Type', 'application/json')
