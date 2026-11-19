@@ -8,7 +8,7 @@ const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { buildSessionDates } = require('../utils/sessionDates')
 const { hasFutureSession, cancelClass } = require('../utils/classCancellation')
 const { sortBySoonest, hasUpcomingSession } = require('../utils/classSearch')
-const { initialClassStatus, getTeacherIsApproved } = require('../utils/classApproval')
+const { notifyAdminsOfFirstClass } = require('../utils/adminNotify')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { isValidClassSize, CLASS_SIZE_ERROR } = require('../utils/classSize')
 const { decodePdf } = require('../utils/pdfUpload')
@@ -235,8 +235,6 @@ router.post('/', requireAuth, requireVerifiedPhone, async (req, res) => {
       return res.status(403).json({ error: `You missed classes you were teaching, so you can post new classes again on ${limits.teaching_paused_until.slice(0, 10)}.` })
     }
 
-    const teacherIsApproved = await getTeacherIsApproved(req.userId)
-
     const { data: cls, error } = await supabase
       .from('classes')
       .insert([{
@@ -253,7 +251,10 @@ router.post('/', requireAuth, requireVerifiedPhone, async (req, res) => {
         recurrence_end_date: format === 'recurring' ? new Date(recurrence_end_date).toISOString() : null,
         materials: materials || null,
         zoom_meeting_link: meeting_link || null,
-        status: initialClassStatus(teacherIsApproved)
+        // No approval step (owner decision, 2026-11-19): a verified phone is
+        // required to post (requireVerifiedPhone), and the admin is told
+        // about every new teacher's first class and can hide it.
+        status: 'approved'
       }])
       .select()
       .single()
@@ -298,7 +299,12 @@ router.post('/', requireAuth, requireVerifiedPhone, async (req, res) => {
     const created = (copy_pdf_from && await copyLessonPdf(copy_pdf_from, cls, req.userId)) || cls
     res.status(201).json({ ...created, sessionCount: sessionDates.length })
     // After the response: the teacher shouldn't wait on other members' email.
-    if (cls.status === 'approved') notifyClassAlerts(cls)
+    notifyClassAlerts(cls)
+    const { count } = await supabase.from('classes').select('id', { count: 'exact', head: true }).eq('teacher_id', req.userId)
+    if (count === 1) {
+      const { data: teacher } = await supabase.from('users').select('first_name, last_name, email').eq('id', req.userId).single()
+      notifyAdminsOfFirstClass(teacher, cls).catch(e => console.error('[FIRST_CLASS_NOTIFY]', e.message))
+    }
   } catch (e) {
     console.log('CATCH ERROR:', e.message)
     fail(res, 500, 'Could not approve class', e)

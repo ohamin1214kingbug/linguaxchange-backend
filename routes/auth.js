@@ -6,7 +6,6 @@ const crypto = require('crypto')
 const { createClient } = require('@supabase/supabase-js')
 const { sendEmail } = require('../utils/mailer')
 const { renderEmail } = require('../utils/emailTemplate')
-const { notifyAdminsOfPendingUser } = require('../utils/adminNotify')
 const { loginLimiter, registerLimiter, otpSendLimiter, otpCheckLimiter, emailCodeSendLimiter, emailCodeCheckLimiter } = require('../middleware/rateLimit')
 const { sendOtp, checkOtp, isValidPhoneNumber, otpErrorKey } = require('../utils/phoneVerify')
 const { phoneAccountLimitReached } = require('../utils/phoneAccountLimit')
@@ -46,7 +45,7 @@ function sendWelcomeEmail({ email, first_name }) {
       heading: `Welcome, ${first_name}!`,
       paragraphs: [
         `You start with ${SIGNUP_CREDIT_GRANT} bananas. Joining a class costs 1, and you earn 1 for every student who attends a class you teach.`,
-        "You can already browse classes and request the one you want. Teaching your own classes opens once your account is approved. We'll email you when it is.",
+        'Join a class, ask for the one you want, or teach your own language: your classes go live as soon as you post them.',
       ],
       button: { label: 'Browse classes', url: `${FRONTEND_URL}/classes` },
     }),
@@ -168,7 +167,6 @@ router.post('/register', registerLimiter, async (req, res) => {
       .insert([{ user_id: newUser.id, balance: SIGNUP_CREDIT_GRANT }])
 
     await sendWelcomeEmail(newUser)
-    await notifyAdminsOfPendingUser(newUser)
 
     const token = jwt.sign(
       { userId: newUser.id },
@@ -320,9 +318,10 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
     res.json({ user, granted: existingCredit ? 0 : SIGNUP_CREDIT_GRANT + (survey === 'granted' ? 1 : 0) })
     // First verification = the signup is now real: the messages a Google
     // signup used to send at once (see /google). Best effort, after the reply.
+    // (No admin email: there is no approval step since 2026-11-19; new
+    // signups are in the admin's daily digest.)
     if (!existingCredit) {
       sendWelcomeEmail(user).catch(e => console.error('[ADD_PHONE] welcome', e.message))
-      notifyAdminsOfPendingUser(user).catch(e => console.error('[ADD_PHONE] admin', e.message))
       if (referred_by) notifyInviteJoined(referred_by, user.first_name)
     }
   } catch (e) {

@@ -25,7 +25,7 @@ async function targets() {
   const { data: teachers, error } = await supabase.from('users')
     .select('id, email, first_name, teach_language, notification_preferences, teach_nudge_sent_at')
     .not('teach_language', 'is', null).not('email', 'is', null)
-    .eq('is_approved', true).is('deleted_at', null)
+    .eq('phone_verified', true).is('deleted_at', null)
   if (error) throw error
   const list = []
   for (const t of teachers) {

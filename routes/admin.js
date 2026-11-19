@@ -7,7 +7,6 @@ const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudg
 const { fail } = require('../utils/failure')
 const { sendEmail } = require('../utils/mailer')
 const { renderEmail, CONTACT } = require('../utils/emailTemplate')
-const { approveMember } = require('../utils/memberApproval')
 const { deleteAccount } = require('../utils/deleteAccount')
 const { buildGrowth } = require('../utils/growth')
 const { logAdminAction } = require('../utils/adminLog')
@@ -132,20 +131,6 @@ router.get('/classes', async (req, res) => {
   }
 })
 
-// Approval, its email and notification, and publishing the member's waiting
-// classes all live in utils/memberApproval.js, shared with the university
-// email confirmation.
-router.post('/users/:id/approve', async (req, res) => {
-  try {
-    await approveMember(req.params.id)
-    await logAdminAction(req.userId, 'approve_member', { targetType: 'user', targetId: Number(req.params.id) })
-    res.json({ success: true })
-  } catch (e) {
-    console.error('[APPROVE]', e.message)
-    res.status(500).json({ error: 'Could not approve user' })
-  }
-})
-
 // GET /api/admin/users/:id/certificate — the bucket is private, so a
 // 10-minute signed link is the only way to open the file.
 router.get('/users/:id/certificate', async (req, res) => {
@@ -192,20 +177,6 @@ router.post('/users/:id/lift-no-show', async (req, res) => {
     res.json({ success: true })
   } catch (e) {
     res.status(500).json({ error: 'Could not lift the limits' })
-  }
-})
-
-router.post('/users/:id/reject', async (req, res) => {
-  try {
-    const { error } = await supabase
-      .from('users')
-      .update({ is_approved: false, approval_reason: 'Rejected by admin' })
-      .eq('id', req.params.id)
-    if (error) return fail(res, 400, 'Could not reject user', error)
-    await logAdminAction(req.userId, 'reject_member', { targetType: 'user', targetId: Number(req.params.id) })
-    res.json({ success: true })
-  } catch (e) {
-    res.status(500).json({ error: 'Could not reject user' })
   }
 })
 
