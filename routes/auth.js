@@ -20,6 +20,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { fail } = require('../utils/failure')
 const { resolveReferrer, notifyInviteJoined } = require('../utils/referrals')
+const { notifyAdminsOfNewMember } = require('../utils/adminNotify')
 const { isSuspended } = require('../utils/suspension')
 const { grantSurveyBanana } = require('../utils/surveyBanana')
 const { newCode, issueCodeToken, checkCode, issueVerifiedToken, isVerifiedFor, codeEmail, normalize } = require('../utils/emailCode')
@@ -167,6 +168,9 @@ router.post('/register', registerLimiter, async (req, res) => {
       .insert([{ user_id: newUser.id, balance: SIGNUP_CREDIT_GRANT }])
 
     await sendWelcomeEmail(newUser)
+    // Email signups verify the phone before the account exists.
+    notifyAdminsOfNewMember({ ...newUser, last_name }, { method: 'email', referred_by })
+      .catch(e => console.error('[REGISTER] admin', e.message))
 
     const token = jwt.sign(
       { userId: newUser.id },
@@ -294,7 +298,7 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
       .from('users')
       .update({ phone_number, phone_verified: true })
       .eq('id', req.userId)
-      .select('id, email, first_name, is_approved, phone_verified, referred_by')
+      .select('id, email, first_name, last_name, is_approved, phone_verified, referred_by')
       .single()
 
     if (error) return fail(res, 400, 'Could not verify phone number', error)
@@ -318,10 +322,10 @@ router.post('/add-phone', requireAuth, otpCheckLimiter, async (req, res) => {
     res.json({ user, granted: existingCredit ? 0 : SIGNUP_CREDIT_GRANT + (survey === 'granted' ? 1 : 0) })
     // First verification = the signup is now real: the messages a Google
     // signup used to send at once (see /google). Best effort, after the reply.
-    // (No admin email: there is no approval step since 2026-11-19; new
-    // signups are in the admin's daily digest.)
+    // The admin's "new member" email goes here too (no approval step).
     if (!existingCredit) {
       sendWelcomeEmail(user).catch(e => console.error('[ADD_PHONE] welcome', e.message))
+      notifyAdminsOfNewMember(user, { method: 'google', referred_by }).catch(e => console.error('[ADD_PHONE] admin', e.message))
       if (referred_by) notifyInviteJoined(referred_by, user.first_name)
     }
   } catch (e) {

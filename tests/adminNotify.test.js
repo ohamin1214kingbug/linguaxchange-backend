@@ -15,3 +15,27 @@ test("the admin is told about a new teacher's first class, with a link to it", a
   expect(sent[0].text).toContain('/classes/42')
   expect(sent[0].text).toContain('already public')
 })
+
+test('the admin is told when a new member finishes signing up', async () => {
+  jest.resetModules()
+  const mails = []
+  jest.doMock('../utils/mailer', () => ({ sendEmail: async msg => { mails.push(msg) } }))
+  jest.doMock('@supabase/supabase-js', () => ({
+    createClient: () => ({
+      from: () => ({
+        select: () => ({
+          is: () => Promise.resolve({ count: 23 }),
+          eq: () => ({ maybeSingle: () => Promise.resolve({ data: { first_name: 'Hamin' } }) }),
+        }),
+      }),
+    }),
+  }))
+  const { notifyAdminsOfNewMember } = require('../utils/adminNotify')
+  await notifyAdminsOfNewMember({ first_name: 'Ana', last_name: 'López', email: 'ana@example.com' }, { method: 'google', referred_by: 7 })
+  expect(mails).toHaveLength(1)
+  expect(mails[0].subject).toBe('New member: Ana López')
+  expect(mails[0].text).toContain('ana@example.com')
+  expect(mails[0].text).toContain('Google')
+  expect(mails[0].text).toContain('Hamin')
+  expect(mails[0].text).toContain('23')
+})
