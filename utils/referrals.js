@@ -84,6 +84,28 @@ async function rewardReferral(studentId) {
   }
 }
 
+// Bell for the member whose link was used (owner plan 6, 2026-11-19), so
+// they know it worked days before any banana arrives. Past the reward cap
+// the message drops the banana promise. Never throws: signup must not fail.
+function inviteJoinedMessage(friendName, rewardsLeft) {
+  const name = friendName || 'A friend'
+  return rewardsLeft > 0
+    ? `${name} signed up with your link! You both get a banana after their first class.`
+    : `${name} signed up with your link! (You've already had all ${MAX_REWARDED_INVITES} invite bananas.)`
+}
+
+async function notifyInviteJoined(referrerId, friendName) {
+  try {
+    const stats = await referralStats(referrerId)
+    const rows = [{ user_id: referrerId, type: 'invite_joined', message: inviteJoinedMessage(friendName, MAX_REWARDED_INVITES - (stats?.rewarded || 0)) }]
+    const { error } = await db().from('notifications').insert(rows)
+    if (error) console.error('[INVITE_JOINED]', error.message)
+    else pushNotifications(rows)
+  } catch (e) {
+    console.error('[INVITE_JOINED]', e.message)
+  }
+}
+
 // What the dashboard's invite card shows: how many joined with the member's
 // link, and how many of those have taken a class (and so paid out).
 async function referralStats(userId) {
@@ -100,4 +122,4 @@ async function referralStats(userId) {
   }
 }
 
-module.exports = { MAX_REWARDED_INVITES, parseInviteCode, resolveReferrer, rewardReferral, referralStats, grantBonus }
+module.exports = { MAX_REWARDED_INVITES, parseInviteCode, resolveReferrer, rewardReferral, referralStats, grantBonus, notifyInviteJoined, inviteJoinedMessage }
