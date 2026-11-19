@@ -65,16 +65,7 @@ router.get('/', publicGetLimiter, async (req, res) => {
     // and StreakCalendar all rely on finished classes coming back.
     const list = req.query.teacher_id ? sorted : sorted.filter(cls => hasUpcomingSession(cls))
 
-    // How many places each session has taken, for the Explore cards' spots
-    // bar. A count only: no names leave this public route.
-    const sessionIds = list.flatMap(cls => (cls.class_sessions || []).map(s => s.id))
-    if (sessionIds.length) {
-      const { data: booked } = await supabase.from('class_enrollments')
-        .select('class_session_id').in('class_session_id', sessionIds).neq('status', 'cancelled')
-      const taken = {}
-      for (const b of booked || []) taken[b.class_session_id] = (taken[b.class_session_id] || 0) + 1
-      for (const cls of list) for (const s of cls.class_sessions || []) s.taken = taken[s.id] || 0
-    }
+    await addTaken(list)
     res.json(list)
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch classes' })
@@ -94,6 +85,19 @@ router.get('/teach-demand', requireAuth, async (req, res) => {
   }
 })
 
+// How many places each session has taken, for spots-left displays (Explore
+// cards, the class page, its share preview). A count only: no names leave
+// these public routes. Sets session.taken in place.
+async function addTaken(list) {
+  const sessionIds = list.flatMap(cls => (cls.class_sessions || []).map(s => s.id))
+  if (!sessionIds.length) return
+  const { data: booked } = await supabase.from('class_enrollments')
+    .select('class_session_id').in('class_session_id', sessionIds).neq('status', 'cancelled')
+  const taken = {}
+  for (const b of booked || []) taken[b.class_session_id] = (taken[b.class_session_id] || 0) + 1
+  for (const cls of list) for (const s of cls.class_sessions || []) s.taken = taken[s.id] || 0
+}
+
 // GET /api/classes/:id — one class, for its own detail page. Public, and
 // deliberately carries no student identities; the roster is a separate
 // authenticated route below.
@@ -106,6 +110,8 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
       .single()
 
     if (error || !data) return res.status(404).json({ error: 'Class not found' })
+    // Spots left on the class page and its share preview (count only).
+    await addTaken([data])
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: 'Could not fetch class' })
