@@ -7,7 +7,6 @@ const { verifyEmailLimiter, publicGetLimiter } = require('../middleware/rateLimi
 const { matchDomain } = require('../utils/universityDomains')
 const { sendEmail } = require('../utils/mailer')
 const { renderEmail } = require('../utils/emailTemplate')
-const { approveMember } = require('../utils/memberApproval')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -160,12 +159,6 @@ router.post('/confirm', async (req, res) => {
       }
       return fail(res, 400, 'Could not confirm that address', error)
     }
-
-    // A confirmed address on the university allowlist proves a real student,
-    // so they can teach without waiting for an admin. Someone an admin has
-    // rejected stays rejected (see approveMember). Best effort: the email is
-    // verified either way, and an admin can still approve by hand.
-    await approveMember(user.id, { auto: true }).catch(e => console.error('[UNIVERSITY_APPROVE]', e.message))
 
     res.json({ success: true, university: uni?.name || domain })
   } catch (e) {

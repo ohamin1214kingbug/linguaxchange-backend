@@ -10,18 +10,25 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || '')
   .map(e => e.trim())
   .filter(Boolean)
 
-// Fire-and-forget: a failed notification shouldn't fail the signup it's
-// about, and admins can always find pending users in /admin regardless.
-async function notifyAdminsOfPendingUser(user) {
+// A new teacher's first class went live (owner decision, 2026-11-19: no
+// approval step). The admin looks at it and can hide it from /admin
+// (classes are rejected there, which takes them off Explore). Best effort.
+async function notifyAdminsOfFirstClass(teacher, cls) {
+  const name = [teacher?.first_name, teacher?.last_name].filter(Boolean).join(' ') || 'A member'
   for (const adminEmail of ADMIN_EMAILS) {
     try {
       await sendEmail({
         to: adminEmail,
-        subject: 'New user waiting for approval',
+        subject: `New teacher: ${name} posted their first class`,
         ...renderEmail({
-          heading: 'New member waiting for approval',
-          paragraphs: [`${user.first_name || 'A new user'} (${user.email}) just signed up and is waiting for approval.`],
-          button: { label: 'Review in admin', url: `${FRONTEND_URL}/admin` },
+          heading: "A new teacher's first class is live",
+          paragraphs: [
+            `${name} (${teacher?.email || 'no email'}) just posted their first class, and it is already public.`,
+            'Have a quick look. If it is not OK, hide it from the admin page.',
+          ],
+          box: [['Class:', cls.title], ['Language:', `${cls.language_code} · ${cls.level}`]],
+          button: { label: 'See the class', url: `${FRONTEND_URL}/classes/${cls.id}` },
+          footnote: `Hide it: ${FRONTEND_URL}/admin (Classes)`,
         }),
       })
     } catch (e) {
@@ -30,4 +37,4 @@ async function notifyAdminsOfPendingUser(user) {
   }
 }
 
-module.exports = { notifyAdminsOfPendingUser }
+module.exports = { notifyAdminsOfFirstClass }
