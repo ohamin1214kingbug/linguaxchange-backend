@@ -1,8 +1,9 @@
 // Chat messages are not kept forever (privacy policy, section 4):
 // - 90 days after a chat closes, its messages are deleted. A class chat
 //   closes 24h after the class (utils/chatAccess.js); a request chat closes
-//   when the request expires (utils/requestChat.js); a tandem chat closes
-//   when either member ends the tandem (routes/tandems.js).
+//   when the request expires (utils/requestChat.js); a tandem chat closes at
+//   chat_open_until or when it ends (utils/tandem.js); a tandem group chat
+//   closes 1 day after its call (90 min is the longest call).
 // - A message the member deleted (deleted_at) is removed for good after 30 days.
 // - Messages written by someone with a pending report against them stay
 //   until the report is handled: they may be the evidence.
@@ -36,10 +37,12 @@ async function purgeChats(now = new Date()) {
   const protectedIds = [...new Set((reports || []).map(r => r.reported_id))]
   const keepReported = q => (protectedIds.length ? q.not('user_id', 'in', `(${protectedIds.join(',')})`) : q)
 
-  const [{ data: sessions }, { data: requests }, { data: tandems }] = await Promise.all([
+  const [{ data: sessions }, { data: requests }, { data: tandems }, { data: groups }] = await Promise.all([
     supabase.from('class_sessions').select('id').lt('session_date', cut.sessionsBefore).limit(BATCH),
     supabase.from('class_requests').select('id').lt('expires_at', cut.requestsBefore).limit(BATCH),
-    supabase.from('tandems').select('id').lt('ended_at', cut.requestsBefore).limit(BATCH),
+    supabase.from('tandems').select('id')
+      .or(`ended_at.lt.${cut.requestsBefore},and(ended_at.is.null,chat_open_until.lt.${cut.requestsBefore})`).limit(BATCH),
+    supabase.from('tandem_groups').select('id').lt('starts_at', cut.sessionsBefore).limit(BATCH),
   ])
   let removed = 0
   const purge = async q => {
@@ -53,6 +56,8 @@ async function purgeChats(now = new Date()) {
   if (requestIds.length) await purge(supabase.from('chat_messages').delete().eq('thread_type', 'request').in('thread_id', requestIds))
   const tandemIds = (tandems || []).map(t => t.id)
   if (tandemIds.length) await purge(supabase.from('chat_messages').delete().eq('thread_type', 'tandem').in('thread_id', tandemIds))
+  const groupIds = (groups || []).map(g => g.id)
+  if (groupIds.length) await purge(supabase.from('chat_messages').delete().eq('thread_type', 'tandem_group').in('thread_id', groupIds))
   await purge(supabase.from('chat_messages').delete().lt('deleted_at', cut.deletedBefore))
   return { removed }
 }

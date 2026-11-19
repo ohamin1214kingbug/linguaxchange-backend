@@ -54,3 +54,84 @@ test('the hello email names the sender, quotes the hello and links to the tandem
   expect(e.text).toContain('Hola! I teach Korean.')
   expect(e.text).toContain('https://gongbuleng.com/tandem')
 })
+
+describe('temporary chats', () => {
+  const { agreeWindowEnd, afterCallEnd, tandemChatOpen, groupChatOpen } = require('../utils/tandem')
+  const NOW = new Date('2026-11-19T12:00:00Z')
+
+  test('a hello accepted now leaves 2 days to agree a time', () => {
+    expect(agreeWindowEnd(NOW).toISOString()).toBe('2026-11-21T12:00:00.000Z')
+  })
+
+  test('an agreed call keeps the chat open until 1 day after a 60-minute call ends', () => {
+    expect(afterCallEnd('2026-11-20T19:00:00Z').toISOString()).toBe('2026-11-21T20:00:00.000Z')
+  })
+
+  test('the 1-to-1 chat is open only while accepted and before chat_open_until', () => {
+    const until = '2026-11-21T12:00:00Z'
+    expect(tandemChatOpen({ status: 'accepted', chat_open_until: until }, NOW)).toBe(true)
+    expect(tandemChatOpen({ status: 'accepted', chat_open_until: until }, new Date('2026-11-21T12:00:01Z'))).toBe(false)
+    expect(tandemChatOpen({ status: 'ended', chat_open_until: until }, NOW)).toBe(false)
+    expect(tandemChatOpen({ status: 'accepted', chat_open_until: null }, NOW)).toBe(false)
+  })
+
+  test('a group chat closes 1 day after its call ends, or at once when cancelled', () => {
+    const g = { starts_at: '2026-11-20T19:00:00Z', duration_minutes: 90 }
+    expect(groupChatOpen(g, new Date('2026-11-21T20:29:00Z'))).toBe(true)
+    expect(groupChatOpen(g, new Date('2026-11-21T20:31:00Z'))).toBe(false)
+    expect(groupChatOpen({ ...g, cancelled_at: '2026-11-19T10:00:00Z' }, NOW)).toBe(false)
+  })
+})
+
+describe('tandem groups', () => {
+  const { validateGroup, groupSide } = require('../utils/tandem')
+  const { groupView } = require('../routes/tandemGroups')
+  const NOW = new Date('2026-11-19T12:00:00Z')
+  const ok = { lang_a: 'ko', lang_b: 'ES', starts_at: '2026-11-20T19:00:00Z', duration_minutes: 60, size: 4, topic: '  Food  ' }
+
+  test('validateGroup normalises a good group and refuses bad ones', () => {
+    const v = validateGroup(ok, NOW)
+    expect(v.ok).toBe(true)
+    expect(v.group).toMatchObject({ lang_a: 'KO', lang_b: 'ES', size: 4, duration_minutes: 60, topic: 'Food' })
+    expect(validateGroup({ ...ok, lang_b: 'KO' }, NOW).ok).toBe(false)
+    expect(validateGroup({ ...ok, lang_a: 'JA' }, NOW).ok).toBe(false)
+    expect(validateGroup({ ...ok, starts_at: '2026-11-19T11:00:00Z' }, NOW).ok).toBe(false)
+    expect(validateGroup({ ...ok, starts_at: '2027-02-01T11:00:00Z' }, NOW).ok).toBe(false)
+    expect(validateGroup({ ...ok, size: 5 }, NOW).ok).toBe(false)
+    expect(validateGroup({ ...ok, duration_minutes: 30 }, NOW).ok).toBe(false)
+    expect(validateGroup({ ...ok, topic: 'x'.repeat(121) }, NOW).ok).toBe(false)
+  })
+
+  test('you join on the side of the language you teach', () => {
+    const g = { lang_a: 'KO', lang_b: 'ES' }
+    expect(groupSide(g, 'KO')).toBe('a')
+    expect(groupSide(g, 'ES')).toBe('b')
+    expect(groupSide(g, 'DE')).toBeNull()
+    expect(groupSide(g, '')).toBeNull()
+  })
+
+  test('groupView: a full side cannot be joined; members see the chat', () => {
+    const group = { id: 1, host_id: 10, lang_a: 'KO', lang_b: 'ES', starts_at: '2099-01-01T19:00:00Z', duration_minutes: 60, size: 4 }
+    const members = [
+      { user_id: 10, side: 'a', users: { first_name: 'Hamin' } },
+      { user_id: 11, side: 'b', users: { first_name: 'Ana' } },
+      { user_id: 12, side: 'b', users: { first_name: 'Luis' } },
+    ]
+    const spanish = groupView(group, members, { id: 13, teach_language: 'ES' })
+    expect(spanish).toMatchObject({ my_side: 'b', full: true, can_join: false, joined: false, host_first_name: 'Hamin' })
+    const korean = groupView(group, members, { id: 14, teach_language: 'KO' })
+    expect(korean).toMatchObject({ my_side: 'a', full: false, can_join: true })
+    const german = groupView(group, members, { id: 15, teach_language: 'DE' })
+    expect(german.can_join).toBe(false)
+    const host = groupView(group, members, { id: 10, teach_language: 'KO' })
+    expect(host).toMatchObject({ joined: true, is_host: true, chat_open: true, can_join: false })
+  })
+})
+
+test('tandem alerts skip the sender, live partners and anyone alerted today', () => {
+  jest.isolateModules(() => {
+    jest.doMock('../utils/push', () => ({ pushNotifications: () => {} }))
+    const { alertRecipients } = require('../utils/tandemAlerts')
+    expect(alertRecipients([1, 2, 3, 4, 4, 5], { senderId: 1, excludeIds: [2], alertedToday: [3] })).toEqual([4, 5])
+  })
+})

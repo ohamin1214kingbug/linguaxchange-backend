@@ -18,7 +18,7 @@ const { decodeCertificate, cleanFileName, certificatePaths, CERTIFICATE_BUCKET }
 // owner-only responses add it. notification_preferences and the teaching
 // defaults are owner-only too — no one else needs to see your settings.
 const PUBLIC_FIELDS = 'id, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_uploaded_at, profile_color, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, university_domain, university_verified_at'
-const USER_FIELDS = 'id, email, phone_verified, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, profile_color, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, notification_preferences, default_class_duration_minutes, default_max_students, university_domain, university_verified_at'
+const USER_FIELDS = 'id, email, phone_verified, first_name, last_name, nationality, bio, photo_url, teach_language, teach_level, learn_languages, has_certificate, certificate_explanation, certificate_name, certificate_uploaded_at, learn_details, profile_color, is_approved, current_streak, longest_streak, timezone, timezone_source, time_format, notification_preferences, default_class_duration_minutes, default_max_students, university_domain, university_verified_at, tandem_open'
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
