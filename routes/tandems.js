@@ -9,7 +9,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { requireAuth } = require('../middleware/auth')
+const { requireAuth, requireVerifiedPhone } = require('../middleware/auth')
 const { chatPostLimiter } = require('../middleware/rateLimit')
 const { cleanMessage } = require('../utils/chatAccess')
 const { tandemMatches, tandemRole, cleanHello, agreeWindowEnd, afterCallEnd, tandemChatOpen } = require('../utils/tandem')
@@ -87,6 +87,9 @@ router.get('/', requireAuth, async (req, res) => {
 // utils/tandemAlerts.js).
 router.put('/open', requireAuth, async (req, res) => {
   const open = req.body?.open === true
+  // Switching on bells other members, so it needs a verified phone;
+  // switching off never does.
+  if (open && !req.phoneVerified) return requireVerifiedPhone(req, res)
   const { data: me } = await supabase.from('users').select('first_name, teach_language, learn_languages, tandem_open').eq('id', req.userId).single()
   const { error } = await supabase.from('users').update({ tandem_open: open }).eq('id', req.userId)
   if (error) return fail(res, 400, 'Could not save', error)
@@ -119,7 +122,7 @@ function helloEmail({ firstName, fromName, message }) {
 }
 
 // POST /api/tandems {partner_id, message} — say hello.
-router.post('/', requireAuth, chatPostLimiter, async (req, res) => {
+router.post('/', requireAuth, requireVerifiedPhone, chatPostLimiter, async (req, res) => {
   const message = cleanHello(req.body?.message)
   const partnerId = parseInt(req.body?.partner_id)
   if (!message) return res.status(400).json({ error: 'Write a short hello (up to 300 characters)' })
@@ -150,7 +153,7 @@ router.post('/', requireAuth, chatPostLimiter, async (req, res) => {
 })
 
 // POST /api/tandems/:id/respond {accept} — only the member who got the hello.
-router.post('/:id/respond', requireAuth, async (req, res) => {
+router.post('/:id/respond', requireAuth, requireVerifiedPhone, async (req, res) => {
   try {
     const t = await loadTandem(req.params.id, req.userId)
     if (t?.role !== 'partner') return res.status(403).json({ error: 'Not your hello to answer' })
@@ -224,7 +227,7 @@ router.get('/:id/chat', requireAuth, async (req, res) => {
 })
 
 // POST /api/tandems/:id/chat {body, proposed_time?} — either member may suggest a time.
-router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
+router.post('/:id/chat', requireAuth, requireVerifiedPhone, chatPostLimiter, async (req, res) => {
   const body = cleanMessage(req.body?.body)
   if (!body) return res.status(400).json({ error: 'Write a message of up to 500 characters' })
   try {
@@ -258,7 +261,7 @@ router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
 // POST /api/tandems/:id/agree {message_id} — accept the other partner's
 // suggested time: that's the call. The chat then stays open until 1 day
 // after it ends, and the video room opens 10 minutes before it.
-router.post('/:id/agree', requireAuth, async (req, res) => {
+router.post('/:id/agree', requireAuth, requireVerifiedPhone, async (req, res) => {
   try {
     const t = await loadTandem(req.params.id, req.userId)
     if (!t) return res.status(403).json({ error: 'Not your tandem' })
@@ -284,7 +287,7 @@ router.post('/:id/agree', requireAuth, async (req, res) => {
 
 // POST /api/tandems/:id/again — "Meet again": reopens the chat for 2 days
 // to agree the next call. A call still coming up is kept.
-router.post('/:id/again', requireAuth, async (req, res) => {
+router.post('/:id/again', requireAuth, requireVerifiedPhone, async (req, res) => {
   try {
     const t = await loadTandem(req.params.id, req.userId)
     if (!t) return res.status(403).json({ error: 'Not your tandem' })

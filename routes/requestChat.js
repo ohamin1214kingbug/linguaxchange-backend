@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { requireAuth } = require('../middleware/auth')
+const { requireAuth, requireVerifiedPhone } = require('../middleware/auth')
 const { chatPostLimiter } = require('../middleware/rateLimit')
 const { cleanMessage } = require('../utils/chatAccess')
 const { extendedExpiry, requestChatAccess, acceptTime } = require('../utils/requestChat')
@@ -95,7 +95,7 @@ router.get('/:id/chat', requireAuth, async (req, res) => {
 
 // POST /api/requests/:id/offer — "Offer to teach": joins the chat as a
 // teacher, holds the refund clock, and tells the student by email.
-router.post('/:id/offer', requireAuth, async (req, res) => {
+router.post('/:id/offer', requireAuth, requireVerifiedPhone, async (req, res) => {
   try {
     const thread = await loadRequest(req.params.id, req.userId)
     if (!thread) return res.status(404).json({ error: 'Request not found' })
@@ -144,7 +144,7 @@ async function emailRequester(request, teacherName) {
 
 // POST /api/requests/:id/chat — a message; the student who asked or a
 // teacher who offered may attach a suggested time.
-router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
+router.post('/:id/chat', requireAuth, requireVerifiedPhone, chatPostLimiter, async (req, res) => {
   const body = cleanMessage(req.body?.body)
   if (!body) return res.status(400).json({ error: 'Write a message of up to 500 characters' })
   try {

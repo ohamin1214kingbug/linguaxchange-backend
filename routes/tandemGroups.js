@@ -8,7 +8,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { requireAuth } = require('../middleware/auth')
+const { requireAuth, requireVerifiedPhone } = require('../middleware/auth')
 const { chatPostLimiter } = require('../middleware/rateLimit')
 const { cleanMessage } = require('../utils/chatAccess')
 const { validateGroup, groupSide, groupChatOpen } = require('../utils/tandem')
@@ -79,7 +79,7 @@ router.get('/', requireAuth, async (req, res) => {
 })
 
 // POST /api/tandem-groups — start one; the host joins on their language's side.
-router.post('/', requireAuth, chatPostLimiter, async (req, res) => {
+router.post('/', requireAuth, requireVerifiedPhone, chatPostLimiter, async (req, res) => {
   const v = validateGroup(req.body)
   if (!v.ok) return res.status(400).json({ error: v.error })
   try {
@@ -122,7 +122,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 // ponytail: the seat check and insert aren't atomic, so two people joining
 // the last seat at the same instant could overfill a side by one; move into
 // a DB function if groups get busy.
-router.post('/:id/join', requireAuth, async (req, res) => {
+router.post('/:id/join', requireAuth, requireVerifiedPhone, async (req, res) => {
   try {
     const g = await loadOne(req.params.id, req.userId)
     if (!g) return res.status(404).json({ error: 'Group not found' })
@@ -187,7 +187,7 @@ router.get('/:id/chat', requireAuth, async (req, res) => {
 })
 
 // POST /api/tandem-groups/:id/chat {body}
-router.post('/:id/chat', requireAuth, chatPostLimiter, async (req, res) => {
+router.post('/:id/chat', requireAuth, requireVerifiedPhone, chatPostLimiter, async (req, res) => {
   const body = cleanMessage(req.body?.body)
   if (!body) return res.status(400).json({ error: 'Write a message of up to 500 characters' })
   try {
