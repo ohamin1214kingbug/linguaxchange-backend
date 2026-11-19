@@ -82,3 +82,14 @@ test('a failing claim (column not there yet) pays nothing and does not throw', a
   expect(mockRpc).not.toHaveBeenCalled()
   spy.mockRestore()
 })
+
+describe('inviteJoinedMessage', () => {
+  const { inviteJoinedMessage } = require('../utils/referrals')
+  test('promises the banana while rewarded invites are left', () => {
+    expect(inviteJoinedMessage('Ana', 9)).toBe('Ana signed up with your link! You both get a banana after their first class.')
+  })
+  test('drops the promise once the cap is used up', () => {
+    expect(inviteJoinedMessage('Ana', 0)).toMatch(/already had all 10 invite bananas/)
+    expect(inviteJoinedMessage('', 3)).toMatch(/^A friend signed up/)
+  })
+})

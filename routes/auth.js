@@ -20,7 +20,7 @@ const supabase = createClient(
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { fail } = require('../utils/failure')
-const { resolveReferrer } = require('../utils/referrals')
+const { resolveReferrer, notifyInviteJoined } = require('../utils/referrals')
 const { isSuspended } = require('../utils/suspension')
 const { grantSurveyBanana } = require('../utils/surveyBanana')
 const { newCode, issueCodeToken, checkCode, issueVerifiedToken, isVerifiedFor, codeEmail, normalize } = require('../utils/emailCode')
@@ -161,6 +161,7 @@ router.post('/register', registerLimiter, async (req, res) => {
       console.error(error)
       return res.status(400).json({ error: 'Could not create your account' })
     }
+    if (referred_by) notifyInviteJoined(referred_by, newUser.first_name)
 
     await supabase
       .from('credits')
@@ -468,6 +469,7 @@ router.post('/google-login', async (req, res) => {
         .single()
 
       if (error) return fail(res, 400, 'Google login failed', error)
+      if (referred_by) notifyInviteJoined(referred_by, newUser.first_name)
 
       await sendWelcomeEmail({ email, first_name })
 
