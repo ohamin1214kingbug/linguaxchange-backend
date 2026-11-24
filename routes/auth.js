@@ -20,7 +20,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { fail } = require('../utils/failure')
 const { resolveReferrer, notifyInviteJoined } = require('../utils/referrals')
-const { notifyAdminsOfNewMember } = require('../utils/adminNotify')
+const { notifyAdminsOfNewMember, notifyAdminsOfBlockedCountry } = require('../utils/adminNotify')
 const { isSuspended } = require('../utils/suspension')
 const { grantSurveyBanana } = require('../utils/surveyBanana')
 const { newCode, issueCodeToken, checkCode, issueVerifiedToken, isVerifiedFor, codeEmail, normalize } = require('../utils/emailCode')
@@ -186,6 +186,23 @@ router.post('/register', registerLimiter, async (req, res) => {
   }
 })
 
+// Who to write back to when their country is blocked (see /send-otp): a
+// signed-in Google signup is read from the token, an email signup sends the
+// address it just typed (no account exists yet at that step). Only used for
+// the admin email, so a bad or missing value just means "not given".
+async function blockedCountryEmail(req) {
+  const header = req.headers.authorization || ''
+  if (header.startsWith('Bearer ')) {
+    try {
+      const { userId } = jwt.verify(header.slice(7), process.env.JWT_SECRET)
+      const { data } = await supabase.from('users').select('email').eq('id', userId).maybeSingle()
+      return data?.email || null
+    } catch { return null }
+  }
+  const email = String(req.body.email || '').trim().toLowerCase()
+  return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null
+}
+
 // POST /api/auth/send-otp — first half of phone verification. Shared by
 // email/password signup (/register) and Google signup (/add-phone), since
 // Google verifies identity but not phone ownership.
@@ -201,6 +218,14 @@ router.post('/send-otp', otpSendLimiter, async (req, res) => {
     // lookup-able when this fails in production.
     console.error('[SEND_OTP]', result.code || '-', result.error)
     const key = otpErrorKey(result.code)
+    if (key === 'auth.otpCountryBlocked') {
+      const email = await blockedCountryEmail(req)
+      notifyAdminsOfBlockedCountry({
+        country: req.body.country, email, key: email || phone_number,
+        method: req.headers.authorization ? 'google' : 'email',
+      }).catch(e => console.error('[ADMIN_NOTIFY] blocked country', e.message))
+      return res.status(400).json({ error: key, email })
+    }
     // 503 when it's our side, so "can't send right now" isn't logged as the
     // visitor submitting something invalid.
     return res.status(key === 'auth.otpUnavailable' ? 503 : 400).json({ error: key })

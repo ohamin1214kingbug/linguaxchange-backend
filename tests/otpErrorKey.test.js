@@ -11,6 +11,10 @@ describe('otpErrorKey', () => {
     expect(otpErrorKey(60205)).toBe('auth.otpBadNumber') // landline
   })
 
+  test('a blocked country gets its own message, never "try again later"', () => {
+    expect(otpErrorKey(60605)).toBe('auth.otpCountryBlocked')
+  })
+
   test('rate limits tell the visitor to wait, not to edit the number', () => {
     expect(otpErrorKey(60203)).toBe('auth.otpTooManyAttempts')
     expect(otpErrorKey(60212)).toBe('auth.otpTooManyAttempts')
