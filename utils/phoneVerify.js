@@ -24,7 +24,11 @@ const USER_FIXABLE = {
   60200: 'auth.otpBadNumber',        // invalid parameter, in practice the number
   60205: 'auth.otpBadNumber',        // landline — can't receive SMS
   60203: 'auth.otpTooManyAttempts',  // max send attempts for this number
-  60212: 'auth.otpTooManyAttempts'   // too many concurrent requests
+  60212: 'auth.otpTooManyAttempts',  // too many concurrent requests
+  // Not the visitor's fault either, but "try again later" never works for
+  // it: the country is off in Verify's Geo Permissions until the owner
+  // switches it on. Gets its own message, and /send-otp tells the admin.
+  60605: 'auth.otpCountryBlocked'
 }
 
 function otpErrorKey(code) {

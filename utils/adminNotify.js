@@ -73,4 +73,58 @@ async function notifyAdminsOfNewMember(user, { method, referred_by } = {}) {
   }
 }
 
-module.exports = { notifyAdminsOfFirstClass, notifyAdminsOfNewMember }
+// Someone's phone country is off in Twilio Verify's Geo Permissions (error
+// 60605; owner request, 2026-11-24). One email per person and at most 10 a
+// day, so every real member reaches the admin but a burst of fake sign-ups
+// can't flood the inbox.
+// ponytail: in-memory, so it resets on each deploy; fine on one Railway instance.
+const BLOCKED_PER_DAY = 10
+let blockedDay = ''
+let blockedSeen = new Set()
+function takeBlockedSlot(key, now = new Date()) {
+  const day = now.toISOString().slice(0, 10)
+  if (day !== blockedDay) { blockedDay = day; blockedSeen = new Set() }
+  if (blockedSeen.has(key) || blockedSeen.size >= BLOCKED_PER_DAY) return false
+  blockedSeen.add(key)
+  return true
+}
+
+function countryName(code) {
+  if (!/^[A-Z]{2}$/.test(code || '')) return 'an unknown country'
+  try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) } catch { return code }
+}
+
+async function notifyAdminsOfBlockedCountry({ country, email, method, key }) {
+  if (!takeBlockedSlot(key || email || 'unknown')) return false
+  const name = countryName(country)
+  const where = /^[A-Z]{2}$/.test(country || '') ? `${name} (${country})` : name
+  const box = [
+    ['Country:', where],
+    ['Signed up with:', method === 'google' ? 'Google' : 'email'],
+    ['Their email:', email || 'not given'],
+    ['When:', new Date().toLocaleString('en-GB', { timeZone: 'Europe/Madrid', dateStyle: 'medium', timeStyle: 'short' }) + ' (Madrid)'],
+  ]
+  const next = method === 'google' ? '/auth/login' : '/auth/register'
+  const reply = email && `mailto:${email}?subject=${encodeURIComponent('You can sign up on GongbuLeng now')}&body=${encodeURIComponent(
+    `Hi! We've switched on text messages to ${name}, so you can verify your phone now: ${FRONTEND_URL}${next}\n\nSee you in class,\nThe GongbuLeng team`)}`
+  for (const adminEmail of ADMIN_EMAILS) {
+    try {
+      await sendEmail({
+        to: adminEmail,
+        subject: `📵 Someone couldn't get a phone code: ${where}`,
+        ...renderEmail({
+          heading: "Someone couldn't get a phone code",
+          paragraphs: [`A new member tried to verify their phone, but Twilio doesn't send codes to ${name}.`],
+          box,
+          button: reply ? { label: 'Reply: "You can sign up now"', url: reply } : undefined,
+          footnote: `To let them in: Twilio → Verify → Fraud & Geo Permissions → Geo Permissions → ${name} → SMS & RCS: Allow All Traffic. Then reply to them. If the same person tries again, no second email; at most ${BLOCKED_PER_DAY} of these a day.`,
+        }),
+      })
+    } catch (e) {
+      console.error('[ADMIN_NOTIFY] Failed to notify', adminEmail, e.message)
+    }
+  }
+  return true
+}
+
+module.exports = { notifyAdminsOfFirstClass, notifyAdminsOfNewMember, notifyAdminsOfBlockedCountry }
