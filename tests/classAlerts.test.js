@@ -9,6 +9,8 @@ const mockSendEmail = jest.fn()
 jest.mock('../utils/mailer', () => ({ sendEmail: (...args) => mockSendEmail(...args) }))
 
 const { validateAlert, buildAlertEmail, notifyClassAlerts } = require('../utils/classAlerts')
+const { ALERT_ONLY_LANGUAGES } = require('../utils/classAlerts')
+const { LANGUAGES } = require('../utils/classRequests')
 
 function chain(result) {
   const builder = {}
@@ -33,6 +35,18 @@ describe('validateAlert', () => {
   test('unknown languages and levels are refused', () => {
     expect(validateAlert({ language_code: 'XX', level: '' })).toMatch(/language/)
     expect(validateAlert({ language_code: 'KO', level: 'Native' })).toMatch(/level/)
+  })
+
+  // Alert-only languages are followable here and nowhere else — the whole
+  // point of the category is that it measures demand without opening a
+  // class people can't fill. If a future edit widens classRequests' list
+  // instead of this one, the second half of this fails.
+  test('alert-only languages are followable but not teachable', () => {
+    for (const code of ALERT_ONLY_LANGUAGES) {
+      expect(validateAlert({ language_code: code, level: '' })).toBeNull()
+      expect(validateAlert({ language_code: code, level: 'A2' })).toBeNull()
+      expect(LANGUAGES).not.toContain(code)
+    }
   })
 })
 

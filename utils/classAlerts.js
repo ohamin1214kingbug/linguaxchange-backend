@@ -12,11 +12,23 @@ const supabase = createClient(
 const LANGUAGE_NAMES = {
   KO: 'Korean', ES: 'Spanish', DE: 'German', EN: 'English',
   PT: 'Portuguese', FR: 'French', IT: 'Italian',
+  ZH: 'Chinese', JA: 'Japanese',
 }
+
+// Languages a member can follow but nobody can teach yet: alerts are the one
+// thing accepted for these, which is how we measure demand before opening a
+// category nobody can fill. Every other endpoint still rejects them.
+//
+// Named here rather than in classRequests' LANGUAGES because that list is
+// what class creation, requests, assignments, resources and profiles all
+// validate against — widening it would open those too.
+const ALERT_ONLY_LANGUAGES = ['ZH', 'JA']
 
 // Pure. Level '' is "any level"; anything else must be a real class level.
 function validateAlert({ language_code, level }) {
-  if (!LANGUAGES.includes(language_code)) return 'That is not a language we teach'
+  if (!LANGUAGES.includes(language_code) && !ALERT_ONLY_LANGUAGES.includes(language_code)) {
+    return 'That is not a language we teach'
+  }
   if (level && !LEVELS.includes(level)) return 'That is not a valid level'
   return null
 }
@@ -72,4 +84,4 @@ async function notifyClassAlerts(cls) {
   }
 }
 
-module.exports = { LANGUAGE_NAMES, validateAlert, buildAlertEmail, notifyClassAlerts }
+module.exports = { LANGUAGE_NAMES, ALERT_ONLY_LANGUAGES, validateAlert, buildAlertEmail, notifyClassAlerts }
