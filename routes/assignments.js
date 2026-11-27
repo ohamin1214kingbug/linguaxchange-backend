@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const { createClient } = require('@supabase/supabase-js')
-const { requireAuth } = require('../middleware/auth')
+const { requireAuth, isAdmin } = require('../middleware/auth')
 const { publicGetLimiter } = require('../middleware/rateLimit')
 const { fail } = require('../utils/failure')
 const { validateAssignmentRequest, expiresAt, MAX_OPEN_PER_USER } = require('../utils/assignmentValidation')
@@ -102,12 +102,43 @@ router.get('/mine', requireAuth, async (req, res) => {
   }
 })
 
+// Signs the caller in when a token is sent, without requiring one, so the
+// public detail page can still tell the student and reviewer apart.
+const optionalAuth = (req, res, next) => (req.headers.authorization ? requireAuth(req, res, next) : next())
+
+// Pure: who may open a request. Unanswered: everyone (reviewers need to read
+// it to answer). Answered: only the student, the reviewer who answered and
+// the admin (owner, 2026-11-27): the writing and its corrections are private
+// once the exchange is done.
+function canView(row, userId, admin = false) {
+  const fb = row.assignment_feedback || []
+  if (fb.length === 0) return true
+  return admin || (userId != null && (userId === row.student_id || fb.some(f => f.reviewer_id === userId)))
+}
+
+// GET /api/assignments/given — requests the caller answered, so a reviewer
+// can find their feedback again once it leaves the board. Before /:id.
+router.get('/given', requireAuth, async (req, res) => {
+  try {
+    const { data: fb, error: e1 } = await supabase.from('assignment_feedback').select('request_id').eq('reviewer_id', req.userId)
+    if (e1) return fail(res, 400, 'Could not fetch your feedback', e1)
+    const ids = (fb || []).map(f => f.request_id)
+    if (ids.length === 0) return res.json([])
+    const { data, error } = await supabase.from('assignment_requests').select(SELECT).in('id', ids).order('created_at', { ascending: false })
+    if (error) return fail(res, 400, 'Could not fetch your feedback', error)
+    res.json((data || []).map(withFeedbackArray))
+  } catch (e) {
+    console.error(e)
+    res.status(500).json({ error: 'Could not fetch your feedback' })
+  }
+})
+
 // GET /api/assignments/:id — one request, expired or not.
 //
 // Separate from the board because the board filters on expires_at: an
 // answered request passes its expiry and disappears from the list, but its own
 // page must keep working for the student who is about to acknowledge it.
-router.get('/:id', publicGetLimiter, async (req, res) => {
+router.get('/:id', publicGetLimiter, optionalAuth, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('assignment_requests')
@@ -117,7 +148,10 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
 
     if (error) return fail(res, 400, 'Could not fetch the request', error)
     if (!data) return res.status(404).json({ error: 'Request not found' })
-    res.json(withFeedbackArray(data))
+    const row = withFeedbackArray(data)
+    // Same answer as a missing request: no hint that a private one exists.
+    if (!canView(row, req.userId, req.userId ? await isAdmin(req.userId) : false)) return res.status(404).json({ error: 'Request not found' })
+    res.json(row)
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not fetch the request' })
@@ -382,3 +416,4 @@ router.post('/:id/acknowledge', requireAuth, async (req, res) => {
 })
 
 module.exports = router
+module.exports.canView = canView
