@@ -91,9 +91,9 @@ router.get('/mine', requireAuth, async (req, res) => {
     const SESSION = 'id, session_date, status, classes!inner(id, title, teacher_id, duration_minutes)'
     const [booked, taught, offers, interest] = await Promise.all([
       supabase.from('class_enrollments').select(`status, class_sessions!inner(${SESSION})`)
-        .eq('user_id', uid).neq('status', 'cancelled').gte('class_sessions.session_date', since).limit(100),
+        .eq('user_id', uid).gte('class_sessions.session_date', since).limit(100),
       supabase.from('class_sessions').select(SESSION)
-        .eq('classes.teacher_id', uid).neq('status', 'cancelled')
+        .eq('classes.teacher_id', uid)
         .gte('session_date', since).lte('session_date', weekAhead).limit(100),
       supabase.from('request_offers').select('request_id').eq('teacher_id', uid),
       supabase.from('class_request_interest').select('request_id').eq('user_id', uid),
@@ -139,7 +139,6 @@ router.get('/class/:classId', requireAuth, async (req, res) => {
       .from('class_sessions')
       .select('id, session_date')
       .eq('class_id', req.params.classId)
-      .neq('status', 'cancelled')
       .order('session_date', { ascending: true })
     for (const s of sessions || []) {
       const thread = await loadThread(s.id, req.userId)
