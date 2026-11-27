@@ -25,6 +25,22 @@ function tandemMatches(me, others, { times = {} } = {}) {
     .sort((a, b) => (b.perfect - a.perfect) || (b.sharedTimes - a.sharedTimes) || (b.id - a.id))
 }
 
+// Everyone listed for a tandem, for the People page's language buttons
+// (owner, 2026-11-27): unlike tandemMatches, also members who teach a
+// language I don't learn. forMe = teaches a language I learn; live = we
+// already have a pending or accepted tandem.
+function openPeople(me, others, liveIds = new Set()) {
+  const myTeach = teaches(me)
+  const myLearn = learns(me)
+  return others
+    .filter(o => o.id !== me.id && teaches(o))
+    .map(o => {
+      const forMe = myLearn.includes(teaches(o))
+      return { ...o, forMe, perfect: forMe && Boolean(myTeach) && learns(o).includes(myTeach), live: liveIds.has(o.id) }
+    })
+    .sort((a, b) => (b.perfect - a.perfect) || (b.forMe - a.forMe) || (b.id - a.id))
+}
+
 // Who may do what to a tandem row.
 function tandemRole(tandem, userId) {
   if (!tandem) return null
@@ -40,7 +56,7 @@ function cleanHello(text) {
   return t && t.length <= HELLO_MAX ? t : null
 }
 
-module.exports = { tandemMatches, tandemRole, cleanHello, HELLO_MAX }
+module.exports = { tandemMatches, openPeople, tandemRole, cleanHello, HELLO_MAX }
 
 // ---- Temporary chats (owner rule, 2026-11-19), like class chats ----
 // A 1-to-1 chat opens for 2 days when a hello is accepted (or on "Meet
