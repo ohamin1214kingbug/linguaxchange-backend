@@ -1,7 +1,9 @@
 process.env.ADMIN_EMAILS = 'admin@example.com'
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret'
 const sent = []
 jest.mock('../utils/mailer', () => ({ sendEmail: async msg => { sent.push(msg) } }))
 const { notifyAdminsOfBlockedCountry } = require('../utils/adminNotify')
+const { openReply } = require('../utils/replyToken')
 
 test('the admin hears about a blocked country once per person, with how to fix it', async () => {
   expect(await notifyAdminsOfBlockedCountry({ country: 'CZ', email: 'ana@example.com', method: 'google', key: 'ana@example.com' })).toBe(true)
@@ -9,10 +11,11 @@ test('the admin hears about a blocked country once per person, with how to fix i
   expect(sent[0].subject).toBe("📵 Someone couldn't get a phone code: Czechia (CZ)")
   expect(sent[0].text).toContain('ana@example.com')
   expect(sent[0].text).toContain('Geo Permissions → Czechia')
-  expect(sent[0].text).toContain('mailto:ana@example.com')
-  // RFC 6068 line breaks: Gmail on iPhone joins lines with a bare %0A.
-  expect(sent[0].text).toContain('%0D%0A%0D%0ASee%20you%20in%20class')
-  expect(sent[0].text).not.toMatch(/[^D]%0A/)
+  // The button opens the admin page with the member's details sealed in the link.
+  const link = sent[0].text.match(/https?:\/\/\S+\/admin\/blocked-reply\?t=([\w-]+)/)
+  expect(link).not.toBeNull()
+  expect(link[0]).not.toContain('ana')
+  expect(openReply(link[1])).toMatchObject({ email: 'ana@example.com', country: 'CZ', method: 'google' })
 
   // Same person again: no second email.
   expect(await notifyAdminsOfBlockedCountry({ country: 'CZ', email: 'ana@example.com', key: 'ana@example.com' })).toBe(false)

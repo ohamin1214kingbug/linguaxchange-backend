@@ -37,7 +37,9 @@ const COUNTRY_BY_TZ = {
 }
 
 // Pure: the email for one member.
-function phoneNowWorksEmail(firstName, country) {
+// opts: url and footnote, for the one-to-one reply sent from the admin page
+// (routes/admin.js, /blocked-reply); the defaults are this script's.
+function phoneNowWorksEmail(firstName, country, { url = URL, footnote = 'Still no code? Write to gongbuleng.team@gmail.com and we’ll sort it out. You get this email once, because your phone couldn’t be verified.' } = {}) {
   return {
     subject: 'Your phone code works now 📱',
     ...renderEmail({
@@ -47,8 +49,8 @@ function phoneNowWorksEmail(firstName, country) {
         'They are now. Finishing your account takes about a minute:',
       ],
       box: [['📱 Verify your phone:', 'we text you a code'], ['🍌 Then:', 'your 3 free bananas arrive at once, enough for 3 classes']],
-      button: { label: 'Verify my phone', url: URL },
-      footnote: 'Still no code? Write to gongbuleng.team@gmail.com and we’ll sort it out. You get this email once, because your phone couldn’t be verified.',
+      button: { label: 'Verify my phone', url },
+      footnote,
     }),
   }
 }
