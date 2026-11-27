@@ -1,5 +1,5 @@
 jest.mock('@supabase/supabase-js', () => ({ createClient: () => ({}) }))
-const { tandemMatches, tandemRole, cleanHello } = require('../utils/tandem')
+const { tandemMatches, openPeople, tandemRole, cleanHello } = require('../utils/tandem')
 const { helloEmail } = require('../routes/tandems')
 
 const me = { id: 1, teach_language: 'ko', learn_languages: ['es', 'de'] }
@@ -133,5 +133,19 @@ test('tandem alerts skip the sender, live partners and anyone alerted today', ()
     jest.doMock('../utils/push', () => ({ pushNotifications: () => {} }))
     const { alertRecipients } = require('../utils/tandemAlerts')
     expect(alertRecipients([1, 2, 3, 4, 4, 5], { senderId: 1, excludeIds: [2], alertedToday: [3] })).toEqual([4, 5])
+  })
+})
+
+describe('openPeople', () => {
+  test('lists everyone who teaches something, perfect first, then for me, then the rest; flags live tandems', () => {
+    const others = [
+      { id: 2, teach_language: 'fr', learn_languages: ['ko'] },   // teaches nothing I learn: still listed
+      { id: 3, teach_language: 'es', learn_languages: ['fr'] },   // for me, one way
+      { id: 4, teach_language: 'de', learn_languages: ['ko'] },   // perfect
+      { id: 5, teach_language: ' ', learn_languages: ['ko'] },    // teaches nothing: left out
+      { id: 1, teach_language: 'es', learn_languages: ['ko'] },   // me
+    ]
+    const p = openPeople(me, others, new Set([3]))
+    expect(p.map(u => [u.id, u.perfect, u.forMe, u.live])).toEqual([[4, true, true, false], [3, false, true, true], [2, false, false, false]])
   })
 })
