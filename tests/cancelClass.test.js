@@ -6,6 +6,7 @@
 
 const mockCalls = []
 let mockFail = null // table whose select should error
+let mockClaimed = true // whether the booking was still 'confirmed' when claimed
 
 function mockBuilder(table) {
   const call = { table, op: 'select' }
@@ -14,6 +15,9 @@ function mockBuilder(table) {
     if (call.op === 'select' && table === mockFail) return { data: null, error: { message: 'connection reset' } }
     if (call.op === 'select' && table === 'class_sessions') {
       return { data: [{ id: 101, status: 'scheduled', session_date: '2999-01-01T10:00:00Z' }], error: null }
+    }
+    if (call.op === 'update' && table === 'class_enrollments') {
+      return { data: mockClaimed ? [{ id: 7 }] : [], error: null }
     }
     if (call.op === 'select' && table === 'class_enrollments') {
       return { data: [{ id: 7, user_id: 12, users: { email: 'ana@example.com', first_name: 'Ana' } }], error: null }
@@ -44,7 +48,7 @@ const { sendEmail } = require('../utils/mailer')
 
 const writes = () => mockCalls.filter(c => c.op === 'update' || c.op === 'insert' || c.rpc)
 
-beforeEach(() => { mockCalls.length = 0; mockFail = null; sendEmail.mockClear() })
+beforeEach(() => { mockCalls.length = 0; mockFail = null; mockClaimed = true; sendEmail.mockClear() })
 
 describe('cancelClass', () => {
   test.each(['class_sessions', 'class_enrollments'])('a failed %s read throws before anything is cancelled', async table => {
@@ -58,7 +62,17 @@ describe('cancelClass', () => {
     const result = await cancelClass(5, { status: 'approved', title: 'Korean A1' })
     expect(result).toEqual({ alreadyCancelled: false, refundedCount: 1 })
     expect(mockCalls.filter(c => c.op === 'update').map(c => c.table)).toEqual(['classes', 'class_sessions', 'class_enrollments'])
+    // The booking is claimed before the refund, not after.
+    expect(mockCalls.findIndex(c => c.op === 'update' && c.table === 'class_enrollments')).toBeLessThan(mockCalls.findIndex(c => c.rpc))
     expect(mockCalls).toContainEqual({ rpc: 'add_credit', args: { p_user_id: 12, p_amount: 1 } })
     expect(sendEmail).toHaveBeenCalledTimes(1)
+  })
+
+  test('a booking another cancel already claimed is not refunded again', async () => {
+    mockClaimed = false
+    const result = await cancelClass(5, { status: 'approved', title: 'Korean A1' })
+    expect(result.refundedCount).toBe(0)
+    expect(mockCalls.some(c => c.rpc)).toBe(false)
+    expect(sendEmail).not.toHaveBeenCalled()
   })
 })

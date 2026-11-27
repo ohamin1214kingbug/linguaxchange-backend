@@ -13,7 +13,7 @@ const { blocksSpend, hasEverTaught } = require('../utils/creditSpendGate')
 const { canConfirmAttendance } = require('../utils/attendanceConfirm')
 const { claimTeacherPayout, payTeacher, releaseClaim } = require('../utils/attendancePayout')
 const { rewardReferral } = require('../utils/referrals')
-const { canRefundCancellation } = require('../utils/enrollmentCancel')
+const { canRefundCancellation, canCancelBooking } = require('../utils/enrollmentCancel')
 const { isSessionFullError } = require('../utils/enrollmentCapacity')
 const { fail } = require('../utils/failure')
 const { pushNotifications } = require('../utils/push')
@@ -284,8 +284,11 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
       .single()
 
     if (fetchError || !enrollment) return res.status(404).json({ error: 'Enrollment not found' })
-    if (enrollment.status !== 'confirmed') {
-      return res.status(400).json({ error: 'This class has already happened' })
+    if (enrollment.status === 'cancelled') {
+      return res.status(400).json({ error: 'This class was cancelled and your banana is already back' })
+    }
+    if (enrollment.status !== 'confirmed' || !canCancelBooking(enrollment.class_sessions.session_date)) {
+      return res.status(400).json({ error: 'This class has already started, so it can no longer be cancelled' })
     }
 
     const refund = canRefundCancellation(enrollment.class_sessions.session_date)
