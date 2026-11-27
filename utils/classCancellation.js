@@ -78,13 +78,29 @@ async function cancelClass(classId, cls, { byPlatform = false } = {}) {
   if (enrollments.length > 0) {
     for (const enrollment of enrollments) {
       try {
-        // supabase-js reports a failed call instead of throwing, so throw it
-        // here: the marking below relies on a failed refund leaving this row
-        // 'confirmed' for a re-run. NULL means no credits row to refund into,
-        // so there is nothing to record.
+        // Claim the booking first: only the call that flips it from
+        // 'confirmed' refunds it. Two cancels at once (a double click, or
+        // the teacher and an admin) both passed the class status check and
+        // both refunded every student (found 2026-11-27). Same
+        // changed-row-gates-refund rule as a student's own cancel.
+        const { data: claimed, error: claimError } = await supabase
+          .from('class_enrollments')
+          .update({ status: 'cancelled' })
+          .eq('id', enrollment.id)
+          .eq('status', 'confirmed')
+          .select('id')
+        if (claimError) throw new Error(`could not mark booking cancelled: ${claimError.message}`)
+        if (!claimed || claimed.length === 0) continue // another cancel already refunded it
+
+        // supabase-js reports a failed call instead of throwing. A failed
+        // refund puts the booking back to 'confirmed', so a re-run picks it
+        // up. NULL means no credits row to refund into, so nothing to record.
         const { data: refundedBalance, error: refundError } = await supabase
           .rpc('add_credit', { p_user_id: enrollment.user_id, p_amount: 1 })
-        if (refundError) throw new Error(`add_credit failed: ${refundError.message}`)
+        if (refundError) {
+          await supabase.from('class_enrollments').update({ status: 'confirmed' }).eq('id', enrollment.id)
+          throw new Error(`add_credit failed: ${refundError.message}`)
+        }
 
         if (refundedBalance !== null) {
           await recordCreditTransaction(supabase, {
@@ -96,21 +112,10 @@ async function cancelClass(classId, cls, { byPlatform = false } = {}) {
           })
         }
 
-        // Marked, not deleted. A student who cancels for themselves has
-        // their row removed — they chose to leave. This student did not:
+        // Marked (above), not deleted. A student who cancels for themselves
+        // has their row removed: they chose to leave. This student did not:
         // they hold a "Class cancelled" credit transaction that points at a
         // class, so the enrolment has to survive for that to make sense.
-        //
-        // Marked per enrolment after its own refund lands, rather than in
-        // one sweep afterwards: a refund that throws leaves its row
-        // 'confirmed', so a re-run picks it up. It also tightens the guard
-        // this loop already relies on — the select above only takes
-        // 'confirmed' rows, so a refunded student can no longer be paid a
-        // second time even if the class status check is ever bypassed.
-        await supabase
-          .from('class_enrollments')
-          .update({ status: 'cancelled' })
-          .eq('id', enrollment.id)
 
         await sendEmail({
           to: enrollment.users?.email,

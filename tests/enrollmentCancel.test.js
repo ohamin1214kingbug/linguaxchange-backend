@@ -1,4 +1,4 @@
-const { canRefundCancellation } = require('../utils/enrollmentCancel')
+const { canRefundCancellation, canCancelBooking } = require('../utils/enrollmentCancel')
 
 describe('canRefundCancellation', () => {
   const now = new Date('2026-08-01T12:00:00Z')
@@ -17,5 +17,16 @@ describe('canRefundCancellation', () => {
 
   test('does not refund for a session already in the past', () => {
     expect(canRefundCancellation('2026-07-30T12:00:00Z', now)).toBe(false)
+  })
+})
+
+describe('canCancelBooking', () => {
+  const now = new Date('2026-08-01T12:00:00Z')
+  test('before the session starts: yes, even inside 24h (just no refund)', () => {
+    expect(canCancelBooking('2026-08-01T12:30:00Z', now)).toBe(true)
+  })
+  test('once it has started or ended: no, the booking pays the teacher', () => {
+    expect(canCancelBooking('2026-08-01T12:00:00Z', now)).toBe(false)
+    expect(canCancelBooking('2026-07-31T12:00:00Z', now)).toBe(false)
   })
 })
