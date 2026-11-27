@@ -13,6 +13,8 @@ const { sendEmail } = require('../utils/mailer')
 const { renderEmail } = require('../utils/emailTemplate')
 const { formatSessionTime } = require('../utils/classReminder')
 const { FRONTEND_URL } = require('../utils/frontendUrl')
+const { cleanSlots, heatmap } = require('../utils/availability')
+const { isAdmin } = require('../middleware/auth')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -133,7 +135,7 @@ router.post('/', requireAuth, async (req, res) => {
     const charge = await chargeForRequest(req.userId)
     if (!charge.ok) return res.status(400).json({ error: charge.error })
 
-    const { ok, ...fields } = check
+    const { ok, slots, ...fields } = check
     const { data, error } = await supabase
       .from('class_requests')
       .insert([{ ...fields, student_id: req.userId, expires_at: expiresAt().toISOString() }])
@@ -143,6 +145,14 @@ router.post('/', requireAuth, async (req, res) => {
     if (error) {
       await refundForRequest(req.userId, 'Class request could not be posted')
       return fail(res, 400, 'Could not post your request', error)
+    }
+    // The requester's free hours from the grid, before the reply so the
+    // teachers' alert and the board already have them. A failure here costs
+    // only the grid, not the request: logged, and they can mark them again.
+    if (slots) {
+      const { error: slotError } = await supabase.from('request_availability')
+        .upsert({ request_id: data.id, user_id: req.userId, slots, updated_at: new Date().toISOString() })
+      if (slotError) console.error('[REQUEST_AVAILABILITY] could not save the requester\'s hours', slotError.message)
     }
     res.status(201).json(data)
     // After the response: the student shouldn't wait on teachers' email.
@@ -219,6 +229,56 @@ router.post('/:id/interest', requireAuth, async (req, res) => {
   }
 })
 
+// GET /api/class-requests/:id/availability — the grid (owner, 2026-11-27).
+// Everyone signed in gets their own hours and the count per hour; first
+// names only go to teachers of that language (and the admin), who pick the
+// hour. Never emails or phones.
+router.get('/:id/availability', requireAuth, async (req, res) => {
+  try {
+    const request = await getOpenRequest(req.params.id)
+    if (!request) return res.status(404).json({ error: 'This request is no longer open' })
+    const [{ data: rows, error }, { data: me }] = await Promise.all([
+      supabase.from('request_availability').select('user_id, slots, users(first_name)').eq('request_id', request.id),
+      supabase.from('users').select('teach_language').eq('id', req.userId).maybeSingle(),
+    ])
+    if (error) return fail(res, 400, 'Could not load the free hours', error)
+    const seesNames = me?.teach_language === request.language_code || await isAdmin(req.userId)
+    const cells = heatmap((rows || []).map(r => ({ user_id: r.user_id, first_name: r.users?.first_name, slots: r.slots })))
+    res.json({
+      mine: (rows || []).find(r => r.user_id === req.userId)?.slots || [],
+      people: (rows || []).filter(r => (r.slots || []).length).length,
+      sees_names: seesNames,
+      cells: seesNames ? cells : cells.map(({ names, ...c }) => c),
+    })
+  } catch (e) {
+    console.error('[REQUEST_AVAILABILITY]', e.message)
+    res.status(500).json({ error: 'Could not load the free hours' })
+  }
+})
+
+// PUT /api/class-requests/:id/availability {slots} — mark my free hours.
+// Marking hours on someone else's request also counts as "+1, me too", so
+// they hear when the class opens; an empty list clears my hours.
+router.put('/:id/availability', requireAuth, async (req, res) => {
+  try {
+    const request = await getOpenRequest(req.params.id)
+    if (!request) return res.status(404).json({ error: 'This request is no longer open' })
+    const slots = cleanSlots(req.body?.slots)
+    if (!slots) return res.status(400).json({ error: 'Send the hours as a list' })
+    const { error } = await supabase.from('request_availability')
+      .upsert({ request_id: request.id, user_id: req.userId, slots, updated_at: new Date().toISOString() })
+    if (error) return fail(res, 400, 'Could not save your hours', error)
+    if (slots.length && request.student_id !== req.userId) {
+      // The primary key makes a repeat a harmless duplicate error.
+      await supabase.from('class_request_interest').insert([{ request_id: request.id, user_id: req.userId }])
+    }
+    res.json({ slots })
+  } catch (e) {
+    console.error('[REQUEST_AVAILABILITY]', e.message)
+    res.status(500).json({ error: 'Could not save your hours' })
+  }
+})
+
 // POST /api/class-requests/:id/fulfill — a teacher answered this request by
 // creating a class. Closes the request and tells everyone who wanted it,
 // which is the entire payoff of the board: without this the people who
@@ -279,7 +339,7 @@ router.post('/:id/fulfill', requireAuth, async (req, res) => {
     pushNotifications(rows)
 
     // The student who asked also gets an email (owner request, 2026-11-14):
-    // a request can sit for up to a day, and the bell is easy to miss.
+    // a request can sit for up to a week, and the bell is easy to miss.
     // After the response is decided, never failing the fulfilment itself.
     emailRequester(request, cls, firstSession, enrolled)
       .catch(e => console.error('[REQUEST_FULFILL] email failed', e.message))
