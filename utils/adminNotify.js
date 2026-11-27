@@ -1,3 +1,4 @@
+const { sealReply } = require('./replyToken')
 const { sendEmail } = require('./mailer')
 const { renderEmail } = require('./emailTemplate')
 const { FRONTEND_URL } = require('./frontendUrl')
@@ -104,12 +105,10 @@ async function notifyAdminsOfBlockedCountry({ country, email, method, key }) {
     ['Their email:', email || 'not given'],
     ['When:', new Date().toLocaleString('en-GB', { timeZone: 'Europe/Madrid', dateStyle: 'medium', timeStyle: 'short' }) + ' (Madrid)'],
   ]
-  const next = method === 'google' ? '/auth/login' : '/auth/register'
-  // Line breaks as CRLF: the mailto standard (RFC 6068) asks for %0D%0A, and
-  // Gmail on iPhone joined the lines into one when they were a bare %0A
-  // (owner report, 2026-11-27).
-  const reply = email && `mailto:${email}?subject=${encodeURIComponent('You can sign up on GongbuLeng now')}&body=${encodeURIComponent(
-    `Hi! We've switched on text messages to ${name}, so you can verify your phone now: ${FRONTEND_URL}${next}\r\n\r\nSee you in class,\r\nThe GongbuLeng team`)}`
+  // Opens the admin page that sends the member the branded "it works now"
+  // email (owner wanted the GongbuLeng design, not a plain Gmail reply,
+  // 2026-11-27). The email travels sealed: utils/replyToken.js.
+  const reply = email && `${FRONTEND_URL}/admin/blocked-reply?t=${sealReply({ email, country, method })}`
   for (const adminEmail of ADMIN_EMAILS) {
     try {
       await sendEmail({
@@ -119,8 +118,8 @@ async function notifyAdminsOfBlockedCountry({ country, email, method, key }) {
           heading: "Someone couldn't get a phone code",
           paragraphs: [`A new member tried to verify their phone, but Twilio doesn't send codes to ${name}.`],
           box,
-          button: reply ? { label: 'Reply: "You can sign up now"', url: reply } : undefined,
-          footnote: `To let them in: Twilio → Verify → Fraud & Geo Permissions → Geo Permissions → ${name} → SMS & RCS: Allow All Traffic. Then reply to them. If the same person tries again, no second email; at most ${BLOCKED_PER_DAY} of these a day.`,
+          button: reply ? { label: 'Send them the "it works now" email', url: reply } : undefined,
+          footnote: `To let them in: Twilio → Verify → Fraud & Geo Permissions → Geo Permissions → ${name} → SMS & RCS: Allow All Traffic. Then press the button above (it works for 7 days). If the same person tries again, no second email; at most ${BLOCKED_PER_DAY} of these a day.`,
         }),
       })
     } catch (e) {
@@ -130,4 +129,4 @@ async function notifyAdminsOfBlockedCountry({ country, email, method, key }) {
   return true
 }
 
-module.exports = { notifyAdminsOfFirstClass, notifyAdminsOfNewMember, notifyAdminsOfBlockedCountry }
+module.exports = { notifyAdminsOfFirstClass, notifyAdminsOfNewMember, notifyAdminsOfBlockedCountry, countryName }

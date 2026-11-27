@@ -5,6 +5,10 @@ const { recordCreditTransaction } = require('../utils/creditLedger')
 const { requireAuth, requireAdmin, isAdmin } = require('../middleware/auth')
 const { resetLowCreditNotificationIfToppedUp } = require('../utils/lowCreditNudge')
 const { fail } = require('../utils/failure')
+const { openReply } = require('../utils/replyToken')
+const { countryName } = require('../utils/adminNotify')
+const { phoneNowWorksEmail } = require('../scripts/phoneNowWorks')
+const { FRONTEND_URL } = require('../utils/frontendUrl')
 const { sendEmail } = require('../utils/mailer')
 const { renderEmail, CONTACT } = require('../utils/emailTemplate')
 const { deleteAccount } = require('../utils/deleteAccount')
@@ -34,6 +38,48 @@ const ACTION_GROUPS = {
   safety: ['suspend', 'unsuspend', 'delete_member', 'lift_no_show', 'reject_member', 'reject_class'],
   private: ['open_certificate', 'open_evidence', 'remove_certificate'],
 }
+// The page behind the button in the blocked-country email
+// (utils/adminNotify.js): shows who it is for, then sends them the branded
+// "your phone code works now" email from notifications@ (owner, 2026-11-27).
+// ponytail: "already sent" lives in memory, so after a deploy the page could
+// send a second copy; fine for a handful of these a week.
+const blockedReplied = new Set()
+const byEmail = email => supabase.from('users').select('first_name, phone_verified').ilike('email', email.replace(/[\\%_]/g, '\\$&')).maybeSingle()
+function blockedReply(t) {
+  const data = openReply(t)
+  if (!data?.email) return null
+  const country = countryName(data.country)
+  const url = `${FRONTEND_URL}${data.method === 'google' ? '/auth/login' : '/auth/register'}`
+  return { ...data, countryLabel: country, url }
+}
+
+router.get('/blocked-reply', async (req, res) => {
+  const r = blockedReply(req.query.t)
+  if (!r) return res.status(400).json({ error: 'This link is out of date or broken. Links work for 7 days.' })
+  const { data: u } = await byEmail(r.email)
+  res.json({ email: r.email, country: r.countryLabel, method: r.method === 'google' ? 'Google' : 'email',
+    first_name: u?.first_name || '', phone_verified: Boolean(u?.phone_verified), sent: blockedReplied.has(req.query.t) })
+})
+
+router.post('/blocked-reply', async (req, res) => {
+  const t = req.body?.t
+  const r = blockedReply(t)
+  if (!r) return res.status(400).json({ error: 'This link is out of date or broken. Links work for 7 days.' })
+  if (blockedReplied.has(t)) return res.status(409).json({ error: 'Already sent.' })
+  const { data: u } = await byEmail(r.email)
+  const mail = phoneNowWorksEmail(u?.first_name || 'there', r.countryLabel, {
+    url: r.url, footnote: 'Still no code? Write to gongbuleng.team@gmail.com and we’ll sort it out.',
+  })
+  blockedReplied.add(t) // before the await, so a double click can't send twice
+  const sent = await sendEmail({ to: r.email, ...mail })
+  if (!sent.ok) {
+    blockedReplied.delete(t)
+    return res.status(502).json({ error: 'The email could not be sent. Try again in a minute.' })
+  }
+  logAdminAction(req.userId, 'blocked_reply', { detail: { country: r.country } })
+  res.json({ ok: true })
+})
+
 router.get('/actions', async (req, res) => {
   try {
     let query = supabase.from('admin_actions')
