@@ -9,7 +9,7 @@ describe('buildInbox', () => {
       { id: 1, session_date: '2026-11-17T10:00:00Z', status: 'scheduled', classes: cls(10, 5) }, // teaching, no messages
       { id: 2, session_date: '2026-11-18T10:00:00Z', status: 'scheduled', classes: cls(11, 9), enrollmentStatus: 'confirmed' },
       { id: 3, session_date: '2026-11-10T10:00:00Z', status: 'completed', classes: cls(12, 9), enrollmentStatus: 'confirmed' }, // closed
-      { id: 4, session_date: '2026-11-18T10:00:00Z', status: 'scheduled', classes: cls(13, 9), enrollmentStatus: 'cancelled' }, // cancelled booking
+      { id: 4, session_date: '2026-11-18T10:00:00Z', status: 'scheduled', classes: cls(13, 9), enrollmentStatus: 'cancelled' }, // cancelled with the class: stays (owner, 2026-11-27)
     ]
     const requests = [
       { id: 7, topic: 'Korean', student_id: 5, expires_at: '2026-11-17T00:00:00Z', fulfilled_class_id: null },
@@ -21,7 +21,7 @@ describe('buildInbox', () => {
       { id: 10, thread_type: 'request', thread_id: 7, body: 'older', user_id: 5 },
     ]
     const inbox = buildInbox({ userId: 5, sessions, requests, messages, now })
-    expect(inbox.map(i => `${i.type}:${i.id}`)).toEqual(['request:7', 'session:2', 'session:1'])
+    expect(inbox.map(i => `${i.type}:${i.id}`)).toEqual(['request:7', 'session:2', 'session:1', 'session:4'])
     expect(inbox[0].last).toMatchObject({ id: 30, first_name: 'Minji', mine: false, proposed_time: '2026-11-20T17:00:00Z' })
     expect(inbox[0].is_requester).toBe(true)
     expect(inbox[1].last.mine).toBe(true)

@@ -16,6 +16,8 @@ const { fail } = require('../utils/failure')
 const { notifyClassAlerts } = require('../utils/classAlerts')
 const { teachDemand } = require('../utils/teachNudge')
 const { logAdminAction } = require('../utils/adminLog')
+const { checkDelay } = require('../utils/classDelay')
+const { pushNotifications } = require('../utils/push')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -33,7 +35,7 @@ router.get('/', publicGetLimiter, async (req, res) => {
   try {
     let query = supabase
       .from('classes')
-      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status)')
+      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status, delayed_minutes)')
       .order('session_date', { foreignTable: 'class_sessions', ascending: true })
 
     // A teacher's own list includes finished classes, which close themselves
@@ -105,7 +107,7 @@ router.get('/:id', publicGetLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('classes')
-      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status)')
+      .select('*, teacher:users!teacher_id(id, first_name, last_name, photo_url), class_sessions(id, session_date, zoom_meeting_link, status, delayed_minutes)')
       .eq('id', req.params.id)
       .single()
 
@@ -402,7 +404,9 @@ async function editableClassOr(classId, userId, { requireFuture = true } = {}) {
   if (userId !== cls.teacher_id && !(await isAdmin(userId))) {
     return { status: 403, error: 'Only the teacher who created this class (or an admin) can edit it' }
   }
-  if (cls.status === 'cancelled') {
+  // Materials stay editable after a cancellation too (owner, 2026-11-27):
+  // the chat and the PDF are how a teacher still helps the students.
+  if (cls.status === 'cancelled' && requireFuture) {
     return { status: 400, error: 'This class has been cancelled and cannot be edited' }
   }
 
@@ -515,6 +519,67 @@ router.post('/:id/materials-pdf', requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e)
     res.status(500).json({ error: 'Could not upload the PDF' })
+  }
+})
+
+// POST /api/classes/sessions/:sessionId/delay {minutes: 5|10|15} — the
+// teacher is running late (owner, 2026-11-27). Moves the start, up to 15
+// minutes in total (utils/classDelay.js), so the no-show cutoff moves with
+// it, and tells every booked student; a student who can't stay may cancel
+// with a refund (routes/enrollments.js). The 'class_starting_soon' type is
+// reused because notifications.type is a closed CHECK list.
+router.post('/sessions/:sessionId/delay', requireAuth, async (req, res) => {
+  try {
+    const { data: s, error } = await supabase.from('class_sessions')
+      .select('id, session_date, status, delayed_minutes, teacher_checked_at, classes(id, title, teacher_id)')
+      .eq('id', req.params.sessionId).maybeSingle()
+    if (error) return fail(res, 400, 'Could not move the class', error)
+    if (!s?.classes) return res.status(404).json({ error: 'Class not found' })
+    if (s.classes.teacher_id !== req.userId) return res.status(403).json({ error: 'Only the teacher can move the start' })
+
+    const minutes = Number(req.body?.minutes)
+    const check = checkDelay({ sessionDate: s.session_date, delayedMinutes: s.delayed_minutes || 0, minutes,
+      status: s.status, teacherCheckedAt: s.teacher_checked_at })
+    if (!check.ok) return res.status(400).json({ error: check.error })
+
+    // Only if nothing changed since the read: two quick presses must not
+    // both add their minutes on top of the same start.
+    const { data: moved, error: moveError } = await supabase.from('class_sessions')
+      .update({ session_date: check.newDate.toISOString(), delayed_minutes: check.delayedMinutes })
+      .eq('id', s.id).eq('session_date', s.session_date).eq('delayed_minutes', s.delayed_minutes || 0).select('id')
+    if (moveError) return fail(res, 400, 'Could not move the class', moveError)
+    if (!moved?.length) return res.status(409).json({ error: 'The start was just changed. Reload and try again.' })
+
+    res.json({ session_date: check.newDate.toISOString(), delayed_minutes: check.delayedMinutes })
+
+    // Tell the booked students; after the reply, so a slow email can't hold the teacher up.
+    const { data: bookings } = await supabase.from('class_enrollments')
+      .select('user_id, users(email, first_name, timezone)').eq('class_session_id', s.id).eq('status', 'confirmed')
+    const rows = (bookings || []).map(b => ({ user_id: b.user_id, type: 'class_starting_soon', class_session_id: s.id,
+      message: `⏰ '${s.classes.title}' starts ${minutes} minutes later. The teacher is running late. Can't make it now? Cancel and your banana comes back.` }))
+    if (rows.length) {
+      const { error: nError } = await supabase.from('notifications').insert(rows)
+      if (nError) console.error('[CLASS_DELAY] notification failed', nError.message)
+      else pushNotifications(rows)
+    }
+    for (const b of bookings || []) {
+      const when = check.newDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: b.users?.timezone || 'Europe/Madrid' })
+      await sendEmail({
+        to: b.users?.email,
+        subject: `'${s.classes.title}' starts ${minutes} minutes later: ${when}`,
+        ...renderEmail({
+          heading: `Your class starts at ${when} ⏰`,
+          paragraphs: [
+            `Hi ${b.users?.first_name || 'there'}, the teacher of '${s.classes.title}' is running a little late, so the class now starts ${minutes} minutes later, at ${when}.`,
+            'Can\'t make the new time? Cancel the class and your banana comes back.',
+          ],
+          button: { label: 'See the class', url: `${FRONTEND_URL}/classes/${s.classes.id}` },
+        }),
+      })
+    }
+  } catch (e) {
+    console.error('[CLASS_DELAY]', e.message)
+    if (!res.headersSent) res.status(500).json({ error: 'Could not move the class' })
   }
 })
 

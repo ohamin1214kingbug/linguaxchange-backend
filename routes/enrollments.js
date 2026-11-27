@@ -278,7 +278,7 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
   try {
     const { data: enrollment, error: fetchError } = await supabase
       .from('class_enrollments')
-      .select('id, status, class_sessions(session_date)')
+      .select('id, status, class_sessions(session_date, delayed_minutes)')
       .eq('id', req.params.id)
       .eq('user_id', user_id)
       .single()
@@ -291,7 +291,8 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'This class has already started, so it can no longer be cancelled' })
     }
 
-    const refund = canRefundCancellation(enrollment.class_sessions.session_date)
+    // A class the teacher moved later always refunds: the change was theirs.
+    const refund = (enrollment.class_sessions.delayed_minutes || 0) > 0 || canRefundCancellation(enrollment.class_sessions.session_date)
 
     // Delete only while still 'confirmed', and let only the call that
     // actually removed the row continue to the refund below. A concurrent
@@ -329,7 +330,7 @@ router.post('/:id/cancel', requireAuth, async (req, res) => {
           user_id,
           amount: 1,
           type: 'refunded',
-          description: 'Cancelled class 24h+ before start'
+          description: (enrollment.class_sessions.delayed_minutes || 0) > 0 ? 'Cancelled a class the teacher moved later' : 'Cancelled class 24h+ before start'
         })
       }
     }
