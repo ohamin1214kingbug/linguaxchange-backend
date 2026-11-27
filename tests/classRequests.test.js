@@ -58,15 +58,30 @@ describe('validateRequest', () => {
 })
 
 describe('expiry', () => {
-  test('expires 24 hours after posting', () => {
-    expect(expiresAt(NOW).toISOString()).toBe('2026-08-07T12:00:00.000Z')
+  test('expires 7 days after posting', () => {
+    expect(expiresAt(NOW).toISOString()).toBe('2026-08-13T12:00:00.000Z')
     expect(hoursLeft(expiresAt(NOW), NOW)).toBe(REQUEST_TTL_HOURS)
   })
 
   test('counts down and floors at zero', () => {
     const expires = expiresAt(NOW)
-    expect(hoursLeft(expires, new Date('2026-08-07T09:30:00Z'))).toBe(2)
-    expect(hoursLeft(expires, new Date('2026-08-07T11:59:00Z'))).toBe(0)
-    expect(hoursLeft(expires, new Date('2026-08-08T00:00:00Z'))).toBe(0)
+    expect(hoursLeft(expires, new Date('2026-08-13T09:30:00Z'))).toBe(2)
+    expect(hoursLeft(expires, new Date('2026-08-13T11:59:00Z'))).toBe(0)
+    expect(hoursLeft(expires, new Date('2026-08-14T00:00:00Z'))).toBe(0)
+  })
+})
+
+describe('free hours from the grid', () => {
+  test('the earliest marked hour becomes the preferred time, flexible', () => {
+    const r = validateRequest(valid({ preferred_time: undefined, slots: ['2026-08-09T19:00:00Z', '2026-08-08T19:00:00Z'] }), NOW)
+    expect(r.ok).toBe(true)
+    expect(r.preferred_time).toBe('2026-08-08T19:00:00.000Z')
+    expect(r.time_flexible).toBe(true)
+    expect(r.slots).toEqual(['2026-08-08T19:00:00.000Z', '2026-08-09T19:00:00.000Z'])
+  })
+  test('a grid with no usable hour is refused; no grid keeps the old single time', () => {
+    expect(validateRequest(valid({ slots: [] }), NOW).ok).toBe(false)
+    expect(validateRequest(valid({ slots: ['2026-08-01T10:00:00Z'] }), NOW).ok).toBe(false)
+    expect(validateRequest(valid(), NOW).slots).toBeNull()
   })
 })

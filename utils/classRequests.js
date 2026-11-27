@@ -1,7 +1,9 @@
-// A posted request is a wanted-ad, not a booking: it stays up for a day and
-// then it's gone. Short on purpose — a board full of month-old "anyone want
-// to teach me subjunctive?" posts is a board nobody reads.
-const REQUEST_TTL_HOURS = 24
+// A posted request is a wanted-ad, not a booking: it stays up for a week
+// and then it's gone, banana refunded if nobody opened a class. A week since
+// 2026-11-27 (was a day): students now mark their free hours for the next 7
+// days (utils/availability.js), and a teacher needs time to see them and
+// pick the hour. The student can withdraw earlier for the banana back.
+const REQUEST_TTL_HOURS = 7 * 24
 
 // How many open requests one person can have at once. Without a cap, one
 // enthusiastic student can bury the board for everyone else.
@@ -14,6 +16,7 @@ const MAX_DETAILS = 400
 // posts fine, then collapses when someone answers it. Same bounds as the
 // classes table, from one place — see utils/classSize.js.
 const { MAX_CLASS_SIZE, isValidClassSize, CLASS_SIZE_ERROR } = require('./classSize')
+const { cleanSlots } = require('./availability')
 
 const LANGUAGES = ['KO', 'ES', 'DE', 'EN', 'PT', 'FR', 'IT']
 const LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
@@ -58,6 +61,15 @@ function validateRequest(body = {}, now = new Date()) {
     return { ok: false, error: CLASS_SIZE_ERROR }
   }
 
+  // Free hours from the grid, when given: the earliest one becomes the
+  // preferred time (what emails and older screens show) and the time is
+  // flexible by definition. The slots themselves go to request_availability.
+  const slots = cleanSlots(body.slots, now)
+  if (body.slots !== undefined && (!slots || slots.length === 0)) {
+    return { ok: false, error: 'Mark at least one hour you are free' }
+  }
+  if (slots) body = { ...body, preferred_time: slots[0], time_flexible: true }
+
   // Required even when flexible: "sometime, whenever" gives a teacher
   // nothing to work from. time_flexible says the time is negotiable, not
   // that there isn't one.
@@ -77,7 +89,8 @@ function validateRequest(body = {}, now = new Date()) {
     details: details || null,
     max_students: maxStudents,
     preferred_time: preferred.toISOString(),
-    time_flexible: !!body.time_flexible
+    time_flexible: !!body.time_flexible,
+    slots: slots || null
   }
 }
 

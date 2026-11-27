@@ -40,7 +40,7 @@ function buildRequestEmail(request, teacher) {
 
 // Called after a request is posted. Nobody heard about new requests before,
 // so a request only got answered if a teacher happened to open the board in
-// its 24 hours. Never throws: the request exists either way.
+// its week (24 hours until 2026-11-27). Never throws: the request exists either way.
 // ponytail: emails every teacher of the language; add weekly availability
 // matching if there are ever enough teachers per language for this to feel
 // like spam.
