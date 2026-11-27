@@ -10,6 +10,9 @@ test('the admin hears about a blocked country once per person, with how to fix i
   expect(sent[0].text).toContain('ana@example.com')
   expect(sent[0].text).toContain('Geo Permissions → Czechia')
   expect(sent[0].text).toContain('mailto:ana@example.com')
+  // RFC 6068 line breaks: Gmail on iPhone joins lines with a bare %0A.
+  expect(sent[0].text).toContain('%0D%0A%0D%0ASee%20you%20in%20class')
+  expect(sent[0].text).not.toMatch(/[^D]%0A/)
 
   // Same person again: no second email.
   expect(await notifyAdminsOfBlockedCountry({ country: 'CZ', email: 'ana@example.com', key: 'ana@example.com' })).toBe(false)

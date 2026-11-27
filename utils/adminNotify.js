@@ -105,8 +105,11 @@ async function notifyAdminsOfBlockedCountry({ country, email, method, key }) {
     ['When:', new Date().toLocaleString('en-GB', { timeZone: 'Europe/Madrid', dateStyle: 'medium', timeStyle: 'short' }) + ' (Madrid)'],
   ]
   const next = method === 'google' ? '/auth/login' : '/auth/register'
+  // Line breaks as CRLF: the mailto standard (RFC 6068) asks for %0D%0A, and
+  // Gmail on iPhone joined the lines into one when they were a bare %0A
+  // (owner report, 2026-11-27).
   const reply = email && `mailto:${email}?subject=${encodeURIComponent('You can sign up on GongbuLeng now')}&body=${encodeURIComponent(
-    `Hi! We've switched on text messages to ${name}, so you can verify your phone now: ${FRONTEND_URL}${next}\n\nSee you in class,\nThe GongbuLeng team`)}`
+    `Hi! We've switched on text messages to ${name}, so you can verify your phone now: ${FRONTEND_URL}${next}\r\n\r\nSee you in class,\r\nThe GongbuLeng team`)}`
   for (const adminEmail of ADMIN_EMAILS) {
     try {
       await sendEmail({
