@@ -8,6 +8,8 @@
 // ponytail: compares every opted-in member in memory; fine for hundreds,
 // move the filter into SQL when the opted-in list gets into the thousands.
 
+const { sharedInterests } = require('./interests')
+
 const learns = u => (u.learn_languages || []).filter(Boolean)
 const teaches = u => (u.teach_language || '').trim()
 
@@ -21,8 +23,11 @@ function tandemMatches(me, others, { times = {} } = {}) {
       ...o,
       perfect: Boolean(myTeach) && learns(o).includes(myTeach),
       sharedTimes: (times[o.id] || []).filter(t => myTimes.has(t)).length,
+      sharedInterests: sharedInterests(me, o),
     }))
-    .sort((a, b) => (b.perfect - a.perfect) || (b.sharedTimes - a.sharedTimes) || (b.id - a.id))
+    // Shared interests right after perfect: they are what makes a stranger
+    // worth a hello (owner, 2026-11-28).
+    .sort((a, b) => (b.perfect - a.perfect) || (b.sharedInterests - a.sharedInterests) || (b.sharedTimes - a.sharedTimes) || (b.id - a.id))
 }
 
 // Everyone listed for a tandem, for the People page's language buttons
@@ -36,9 +41,9 @@ function openPeople(me, others, liveIds = new Set()) {
     .filter(o => o.id !== me.id && teaches(o))
     .map(o => {
       const forMe = myLearn.includes(teaches(o))
-      return { ...o, forMe, perfect: forMe && Boolean(myTeach) && learns(o).includes(myTeach), live: liveIds.has(o.id) }
+      return { ...o, forMe, perfect: forMe && Boolean(myTeach) && learns(o).includes(myTeach), live: liveIds.has(o.id), sharedInterests: sharedInterests(me, o) }
     })
-    .sort((a, b) => (b.perfect - a.perfect) || (b.forMe - a.forMe) || (b.id - a.id))
+    .sort((a, b) => (b.perfect - a.perfect) || (b.forMe - a.forMe) || (b.sharedInterests - a.sharedInterests) || (b.id - a.id))
 }
 
 // Who may do what to a tandem row.
