@@ -23,7 +23,7 @@ const { fail } = require('../utils/failure')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY)
 
-const PUBLIC = 'id, first_name, photo_url, profile_color, teach_language, learn_languages, learn_details'
+const PUBLIC = 'id, first_name, photo_url, profile_color, teach_language, learn_languages, learn_details, interests'
 const LIVE = ['pending', 'accepted']
 
 async function notify(userId, type, message) {
@@ -45,7 +45,7 @@ router.get('/', requireAuth, async (req, res) => {
   try {
     const now = new Date().toISOString()
     const [{ data: me }, { data: open }, { data: mine }] = await Promise.all([
-      supabase.from('users').select('id, teach_language, learn_languages, tandem_open').eq('id', req.userId).single(),
+      supabase.from('users').select('id, teach_language, learn_languages, tandem_open, interests').eq('id', req.userId).single(),
       supabase.from('users').select(PUBLIC).eq('tandem_open', true).is('deleted_at', null)
         .or(`suspended_until.is.null,suspended_until.lt.${now}`).neq('id', req.userId).limit(1000),
       supabase.from('tandems').select('*').or(`requester_id.eq.${req.userId},partner_id.eq.${req.userId}`)
@@ -65,6 +65,7 @@ router.get('/', requireAuth, async (req, res) => {
     const byId = Object.fromEntries((others || []).map(u => [u.id, u]))
     res.json({
       open: Boolean(me?.tandem_open),
+      my_interests: me?.interests || [],
       open_count: (open || []).length,
       teach_language: me?.teach_language || '',
       learn_languages: (me?.learn_languages || []).filter(Boolean),
@@ -90,14 +91,14 @@ router.get('/people', requireAuth, async (req, res) => {
   try {
     const now = new Date().toISOString()
     const [{ data: me }, { data: open, error }, { data: mine }] = await Promise.all([
-      supabase.from('users').select('id, teach_language, learn_languages, tandem_open').eq('id', req.userId).single(),
+      supabase.from('users').select('id, teach_language, learn_languages, tandem_open, interests').eq('id', req.userId).single(),
       supabase.from('users').select(PUBLIC).eq('tandem_open', true).is('deleted_at', null)
         .or(`suspended_until.is.null,suspended_until.lt.${now}`).neq('id', req.userId).limit(1000),
       supabase.from('tandems').select('requester_id, partner_id').or(`requester_id.eq.${req.userId},partner_id.eq.${req.userId}`).in('status', LIVE),
     ])
     if (error) throw error
     const liveIds = new Set((mine || []).map(t => (t.requester_id === req.userId ? t.partner_id : t.requester_id)))
-    res.json({ open: Boolean(me?.tandem_open), people: openPeople(me || { id: req.userId }, open || [], liveIds) })
+    res.json({ open: Boolean(me?.tandem_open), my_interests: me?.interests || [], people: openPeople(me || { id: req.userId }, open || [], liveIds) })
   } catch (e) {
     console.error('[TANDEM_PEOPLE]', e.message)
     res.status(500).json({ error: 'Could not load people' })
